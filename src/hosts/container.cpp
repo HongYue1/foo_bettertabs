@@ -206,6 +206,7 @@ private:
     void on_create(HWND wnd) noexcept;
     void on_destroy() noexcept;
     void on_paint(HWND wnd) noexcept;
+    void fill_background(HDC dc) const noexcept;
 
     void load(InstanceData&& data);
     [[nodiscard]] InstanceData snapshot(bool refresh_children) const;
@@ -862,7 +863,14 @@ LRESULT TabsContainer::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             mmi->ptMaxTrackSize.y = static_cast<LONG>(limits_.max_height);
             return 0;
         }
-        case WM_ERASEBKGND: return 1;
+        // Transparent children (Columns UI splitters, toolbars, many panels) paint their
+        // background by forwarding these to us with their own DC and origin, so both must really
+        // paint: an empty Row/Column splitter would otherwise keep whatever was on screen before.
+        // Our own erase only reaches the area no child covers (WS_CLIPCHILDREN).
+        case WM_ERASEBKGND: fill_background(reinterpret_cast<HDC>(wp)); return 1;
+        case WM_PRINTCLIENT:
+            if ((lp & PRF_ERASEBKGND) != 0) fill_background(reinterpret_cast<HDC>(wp));
+            return 0;
         case WM_PAINT: on_paint(wnd); return 0;
         case WM_SETFOCUS:
             if (active_ != nullptr && active_->wnd != nullptr) {
@@ -934,12 +942,18 @@ void TabsContainer::on_paint(HWND wnd) noexcept {
     // Only reached where no child covers the client area (WS_CLIPCHILDREN), e.g. with no tabs.
     PAINTSTRUCT ps{};
     const HDC dc = BeginPaint(wnd, &ps);
-    if (dc != nullptr) {
-        const HBRUSH brush = CreateSolidBrush(background_);
-        FillRect(dc, &ps.rcPaint, brush);
-        DeleteObject(brush);
-    }
+    if (dc != nullptr) fill_background(dc);
     EndPaint(wnd, &ps);
+}
+
+void TabsContainer::fill_background(HDC dc) const noexcept {
+    if (dc == nullptr) return;
+    RECT clip{};
+    if (GetClipBox(dc, &clip) == ERROR || IsRectEmpty(&clip)) return;
+    // The stock DC brush: no GDI object is created per erase.
+    const COLORREF previous = SetDCBrushColor(dc, background_);
+    FillRect(dc, &clip, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    SetDCBrushColor(dc, previous);
 }
 
 void TabsContainer::refresh_appearance() noexcept {

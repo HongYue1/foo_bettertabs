@@ -177,6 +177,9 @@ public:
     void get_supported_panels(const pfc::list_base_const_t<uie::window::ptr>& windows,
                               bit_array_var& mask_unsupported) override;
     void reorder_panels(const size_t* order, size_t count) override;
+    //! Layout editing (live edit, Ctrl+Shift+right-click) walks the tree through this. Without it the
+    //! container cannot be selected and its children's menus lack the container entries.
+    bool is_point_ours(HWND wnd_point, const POINT& pt_screen, pfc::list_base_t<uie::window_ptr>& hierarchy) override;
 
     // For the host and the colour/font clients ---------------------------------------------
 
@@ -1088,6 +1091,37 @@ uie::splitter_item_t* TabsContainer::get_panel(t_size index) const {
     item->m_extra_data.set_data_fromptr(extra.data(), extra.size());
     item->m_extra_data_format_id = guids::tab_extra_format;
     return item;
+}
+
+bool TabsContainer::is_point_ours(HWND wnd_point, const POINT& pt_screen,
+                                  pfc::list_base_t<uie::window_ptr>& hierarchy) {
+    // Same shape as Columns UI's Tab stack (splitter_tabs.h): the container itself and its strip
+    // select the container; a point in a child selects the child with the container as its
+    // parent, recursing into child splitters. Only created children can be under the point.
+    const HWND self = get_wnd();
+    if (self == nullptr || wnd_point == nullptr) return false;
+    if (wnd_point != self && !IsChild(self, wnd_point)) return false;
+    if (wnd_point == self || wnd_point == strip_.hwnd()) {
+        hierarchy.add_item(this);
+        return true;
+    }
+    for (const auto& tab : tabs_) {
+        if (tab->wnd == nullptr || !tab->window.is_valid()) continue;
+        uie::splitter_window_v2_ptr splitter;
+        if (tab->window->service_query_t(splitter)) {
+            pfc::list_t<uie::window_ptr> nested;
+            nested.add_item(this);
+            if (splitter->is_point_ours(wnd_point, pt_screen, nested)) {
+                hierarchy.add_items(nested);
+                return true;
+            }
+        } else if (wnd_point == tab->wnd || IsChild(tab->wnd, wnd_point)) {
+            hierarchy.add_item(this);
+            hierarchy.add_item(tab->window);
+            return true;
+        }
+    }
+    return false;
 }
 
 void TabsContainer::reorder_panels(const size_t* order, size_t count) {

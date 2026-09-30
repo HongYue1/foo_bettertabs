@@ -1,0 +1,793 @@
+#include <windows.h>
+#include <windowsx.h>
+
+#include "strip_window.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
+
+#include "../platform/graphics.h"
+
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+namespace bettertabs {
+
+namespace {
+
+constexpr wchar_t class_name[] = L"foo_bettertabs_strip";
+constexpr UINT wm_dpichanged_afterparent = 0x02E3;
+constexpr float wide_layout = 100000.0f;
+
+[[nodiscard]] HINSTANCE module_instance() noexcept {
+    return reinterpret_cast<HINSTANCE>(&__ImageBase);
+}
+
+[[nodiscard]] D2D1_COLOR_F colour(COLORREF c, float alpha = 1.0f) noexcept {
+    return D2D1_COLOR_F{static_cast<float>(GetRValue(c)) / 255.0f, static_cast<float>(GetGValue(c)) / 255.0f,
+                        static_cast<float>(GetBValue(c)) / 255.0f, alpha};
+}
+
+//! t of `a` over (1 - t) of `b`, opaque. Inactive text is a blend, never real alpha, so ClearType
+//! stays available.
+[[nodiscard]] COLORREF blend(COLORREF a, COLORREF b, float t) noexcept {
+    const auto mix = [t](int x, int y) {
+        return static_cast<BYTE>(std::lround(static_cast<float>(x) * t + static_cast<float>(y) * (1.0f - t)));
+    };
+    return RGB(mix(GetRValue(a), GetRValue(b)), mix(GetGValue(a), GetGValue(b)), mix(GetBValue(a), GetBValue(b)));
+}
+
+[[nodiscard]] bool intersects(const RECT& a, const RECT& b) noexcept {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+[[nodiscard]] int ceil_px(float value) noexcept { return static_cast<int>(std::ceil(value - 0.001f)); }
+
+enum class Edge : std::uint8_t { top, bottom, left, right };
+
+} // namespace
+
+StripWindow::~StripWindow() {
+    destroy();
+    release_buffer();
+}
+
+bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
+    if (wnd_ != nullptr) return true;
+    static const ATOM atom = [] {
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = &StripWindow::window_proc;
+        wc.hInstance = module_instance();
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = class_name;
+        return RegisterClassExW(&wc);
+    }();
+    if (atom == 0) return false;
+
+    listener_ = &listener;
+    cleartype_ = gfx::system_uses_cleartype();
+    const HWND wnd = CreateWindowExW(0, class_name, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 0, 0, parent,
+                                     nullptr, module_instance(), this);
+    if (wnd == nullptr) {
+        listener_ = nullptr;
+        return false;
+    }
+    dpi_ = gfx::window_dpi(wnd);
+    const LRESULT ui_state = SendMessageW(wnd, WM_QUERYUISTATE, 0, 0);
+    hide_focus_ = (ui_state & UISF_HIDEFOCUS) != 0;
+    rebuild_text_format();
+    rebuild_items();
+    update_thickness();
+    return true;
+}
+
+void StripWindow::destroy() noexcept {
+    if (wnd_ != nullptr) DestroyWindow(wnd_);
+    wnd_ = nullptr;
+    target_.reset();
+    brush_.reset();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Inputs from the host. Everything expensive happens here, never in WM_PAINT.
+
+void StripWindow::set_settings(const Settings& settings) noexcept {
+    if (settings == settings_) return;
+    settings_ = settings;
+    update_thickness();
+    relayout();
+    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::set_theme(const StripTheme& theme) noexcept {
+    if (theme == theme_) return;
+    theme_ = theme;
+    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::set_font(const StripFont& font) noexcept {
+    font_ = font;
+    rebuild_text_format();
+    rebuild_items();
+    update_thickness();
+    relayout();
+    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::set_labels(std::span<const std::wstring> labels, std::size_t active) noexcept {
+    try {
+        items_.resize(labels.size());
+        for (std::size_t i = 0; i < labels.size(); ++i) items_[i].label = labels[i];
+    } catch (...) {
+        items_.clear();
+    }
+    active_ = active < items_.size() ? active : no_index;
+    hover_ = no_index;
+    rebuild_items();
+    update_thickness();
+    relayout();
+    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::set_active(std::size_t active) noexcept {
+    if (active >= items_.size()) active = no_index;
+    if (active == active_) return;
+    const std::size_t old = active_;
+    active_ = active;
+    if (layout_.overflow && active != no_index && (active < layout_.first || active >= layout_.last)) {
+        // The visible window of tabs has to move.
+        relayout();
+        if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+        return;
+    }
+    invalidate_tab(old);
+    invalidate_tab(active);
+}
+
+void StripWindow::take_paint_stats(perf::PaintStats& out) noexcept {
+    out = stats_;
+    stats_ = perf::PaintStats{};
+}
+
+// ---------------------------------------------------------------------------------------------
+// Text and metrics.
+
+void StripWindow::rebuild_text_format() noexcept {
+    text_format_.reset();
+    line_height_ = 0;
+    IDWriteFactory* factory = gfx::dwrite();
+    if (factory == nullptr) return;
+
+    LOGFONTW lf = font_.font;
+    unsigned font_dpi = font_.font_dpi != 0 ? font_.font_dpi : 96;
+    if (lf.lfFaceName[0] == L'\0') {
+        NONCLIENTMETRICSW ncm{};
+        ncm.cbSize = sizeof(ncm);
+        if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
+            lf = ncm.lfMessageFont;
+            font_dpi = gfx::system_dpi();
+        }
+    }
+
+    try {
+        com_ptr<IDWriteGdiInterop> interop;
+        if (FAILED(factory->GetGdiInterop(interop.put()))) return;
+        com_ptr<IDWriteFont> font;
+        if (FAILED(interop->CreateFontFromLOGFONT(&lf, font.put()))) {
+            // An uninstalled face: fall back to the message font rather than to nothing.
+            NONCLIENTMETRICSW ncm{};
+            ncm.cbSize = sizeof(ncm);
+            if (!SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) return;
+            lf = ncm.lfMessageFont;
+            font_dpi = gfx::system_dpi();
+            if (FAILED(interop->CreateFontFromLOGFONT(&lf, font.put()))) return;
+        }
+
+        std::wstring family_name = L"Segoe UI";
+        com_ptr<IDWriteFontFamily> family;
+        com_ptr<IDWriteLocalizedStrings> names;
+        if (SUCCEEDED(font->GetFontFamily(family.put())) && SUCCEEDED(family->GetFamilyNames(names.put()))) {
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            if (FAILED(names->FindLocaleName(L"en-us", &index, &exists)) || !exists) index = 0;
+            UINT32 length = 0;
+            if (SUCCEEDED(names->GetStringLength(index, &length))) {
+                std::wstring name(length + 1, L'\0');
+                if (SUCCEEDED(names->GetString(index, name.data(), length + 1))) {
+                    name.resize(length);
+                    family_name = std::move(name);
+                }
+            }
+        }
+
+        DWRITE_FONT_METRICS metrics{};
+        font->GetMetrics(&metrics);
+        float em = 12.0f;
+        if (lf.lfHeight < 0) {
+            em = static_cast<float>(-lf.lfHeight);
+        } else if (lf.lfHeight > 0 && metrics.ascent + metrics.descent != 0) {
+            // Positive lfHeight is the cell height, not the em.
+            em = static_cast<float>(lf.lfHeight) * static_cast<float>(metrics.designUnitsPerEm) /
+                 static_cast<float>(metrics.ascent + metrics.descent);
+        } else {
+            font_dpi = 96;
+        }
+        em = em * static_cast<float>(dpi_) / static_cast<float>(font_dpi);
+
+        com_ptr<IDWriteTextFormat> format;
+        if (FAILED(factory->CreateTextFormat(family_name.c_str(), nullptr, font->GetWeight(), font->GetStyle(),
+                                             font->GetStretch(), em, L"", format.put()))) {
+            return;
+        }
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        com_ptr<IDWriteInlineObject> ellipsis;
+        if (SUCCEEDED(factory->CreateEllipsisTrimmingSign(format.get(), ellipsis.put()))) {
+            format->SetTrimming(&trimming, ellipsis.get());
+        }
+
+        com_ptr<IDWriteTextLayout> probe;
+        if (SUCCEEDED(factory->CreateTextLayout(L"Ag", 2, format.get(), wide_layout, wide_layout, probe.put()))) {
+            DWRITE_TEXT_METRICS tm{};
+            if (SUCCEEDED(probe->GetMetrics(&tm))) line_height_ = ceil_px(tm.height);
+        }
+        if (line_height_ <= 0) line_height_ = ceil_px(em * 1.33f);
+        text_format_ = std::move(format);
+    } catch (...) {
+        text_format_.reset();
+    }
+}
+
+void StripWindow::rebuild_items() noexcept {
+    IDWriteFactory* factory = gfx::dwrite();
+    for (Item& item : items_) {
+        item.layout.reset();
+        item.text_width = 0;
+        item.text_height = line_height_;
+        item.draw_width = 0;
+        if (factory == nullptr || !text_format_) continue;
+        if (FAILED(factory->CreateTextLayout(item.label.c_str(), static_cast<UINT32>(item.label.size()),
+                                             text_format_.get(), wide_layout, static_cast<float>(line_height_),
+                                             item.layout.put()))) {
+            continue;
+        }
+        DWRITE_TEXT_METRICS tm{};
+        if (SUCCEEDED(item.layout->GetMetrics(&tm))) {
+            item.text_width = ceil_px(tm.widthIncludingTrailingWhitespace);
+            item.text_height = (std::max)(line_height_, ceil_px(tm.height));
+        }
+        item.draw_width = item.text_width;
+    }
+}
+
+void StripWindow::update_thickness() noexcept {
+    const int pad_x = px(settings_.pad_x);
+    const int pad_y = px(settings_.pad_y);
+    int value = 0;
+    if (horizontal() || rotated()) {
+        value = line_height_ + 2 * pad_y;
+    } else {
+        int widest = 0;
+        for (const Item& item : items_) widest = (std::max)(widest, item.text_width);
+        value = std::clamp(widest + 2 * pad_x, px(48), px(280));
+    }
+    value = (std::max)(value, px(settings_.thickness));
+    thickness_ = (std::max)(value, 1);
+}
+
+void StripWindow::relayout() noexcept {
+    const int pad_x = px(settings_.pad_x);
+    const int pad_y = px(settings_.pad_y);
+    const bool along_text = horizontal() || rotated();
+    try {
+        extents_.resize(items_.size());
+        for (std::size_t i = 0; i < items_.size(); ++i) {
+            extents_[i] = along_text ? items_[i].text_width + 2 * pad_x : line_height_ + 2 * pad_y;
+        }
+        StripLayoutInput in;
+        in.length = horizontal() ? width_ : height_;
+        in.sizing = settings_.sizing;
+        in.align = settings_.align;
+        in.spacing = px(settings_.spacing);
+        in.chevron = px(24);
+        in.extents = extents_;
+        in.active = active_;
+        layout_strip(in, layout_);
+    } catch (...) {
+        layout_ = StripLayout{};
+        return;
+    }
+
+    // Clipped tabs get an ellipsis: narrow their layouts now so painting only reads them.
+    const int across_room = (horizontal() ? height_ : width_) - 2 * pad_x;
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        Item& item = items_[i];
+        if (!item.layout) continue;
+        int room = item.text_width;
+        if (i < layout_.tabs.size() && layout_.tabs[i].length > 0) {
+            room = along_text ? layout_.tabs[i].length - 2 * pad_x : across_room;
+        }
+        room = (std::max)(0, room);
+        const int draw = (std::min)(item.text_width, room);
+        if (draw != item.draw_width) {
+            item.layout->SetMaxWidth(draw < item.text_width ? static_cast<float>(draw) : wide_layout);
+            item.draw_width = draw;
+        }
+    }
+}
+
+int StripWindow::px(int dips) const noexcept { return MulDiv(dips, static_cast<int>(dpi_), 96); }
+
+bool StripWindow::horizontal() const noexcept {
+    return settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
+}
+
+bool StripWindow::rotated() const noexcept { return !horizontal() && settings_.side_text == SideText::rotated; }
+
+RECT StripWindow::tab_rect(std::size_t index) const noexcept {
+    if (index >= layout_.tabs.size() || layout_.tabs[index].length <= 0) return RECT{};
+    const Span& s = layout_.tabs[index];
+    return horizontal() ? RECT{s.start, 0, s.end(), height_} : RECT{0, s.start, width_, s.end()};
+}
+
+RECT StripWindow::chevron_rect() const noexcept {
+    if (!layout_.overflow || layout_.chevron.length <= 0) return RECT{};
+    const Span& s = layout_.chevron;
+    return horizontal() ? RECT{s.start, 0, s.end(), height_} : RECT{0, s.start, width_, s.end()};
+}
+
+std::size_t StripWindow::hit_test(POINT pt) const noexcept {
+    if (pt.x < 0 || pt.y < 0 || pt.x >= width_ || pt.y >= height_) return no_index;
+    return hit_test_strip(layout_, horizontal() ? pt.x : pt.y);
+}
+
+bool StripWindow::chevron_hit(POINT pt) const noexcept {
+    const RECT r = chevron_rect();
+    return PtInRect(&r, pt) != FALSE;
+}
+
+void StripWindow::invalidate_tab(std::size_t index) noexcept {
+    if (wnd_ == nullptr || index == no_index) return;
+    const RECT r = tab_rect(index);
+    if (r.right > r.left && r.bottom > r.top) InvalidateRect(wnd_, &r, FALSE);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Back buffer and rendering.
+
+bool StripWindow::ensure_buffer(int width, int height) noexcept {
+    if (width <= 0 || height <= 0) return false;
+    if (dib_ != nullptr && width <= buffer_width_ && height <= buffer_height_) return true;
+    // Grow in steps so dragging a splitter does not reallocate on every pixel.
+    const int new_width = (std::max)(buffer_width_, (width + 255) / 256 * 256);
+    const int new_height = (std::max)(buffer_height_, (height + 31) / 32 * 32);
+    release_buffer();
+    mem_dc_ = CreateCompatibleDC(nullptr);
+    if (mem_dc_ == nullptr) return false;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = new_width;
+    bi.bmiHeader.biHeight = -new_height;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    dib_ = CreateDIBSection(mem_dc_, &bi, DIB_RGB_COLORS, &bits_, nullptr, 0);
+    if (dib_ == nullptr) {
+        release_buffer();
+        return false;
+    }
+    old_bitmap_ = SelectObject(mem_dc_, dib_);
+    buffer_width_ = new_width;
+    buffer_height_ = new_height;
+    return true;
+}
+
+void StripWindow::release_buffer() noexcept {
+    if (mem_dc_ != nullptr && old_bitmap_ != nullptr) SelectObject(mem_dc_, old_bitmap_);
+    if (dib_ != nullptr) DeleteObject(dib_);
+    if (mem_dc_ != nullptr) DeleteDC(mem_dc_);
+    mem_dc_ = nullptr;
+    dib_ = nullptr;
+    old_bitmap_ = nullptr;
+    bits_ = nullptr;
+    buffer_width_ = 0;
+    buffer_height_ = 0;
+}
+
+bool StripWindow::ensure_target() noexcept {
+    if (target_) return true;
+    ID2D1Factory* factory = gfx::d2d();
+    if (factory == nullptr) return false;
+    // Software: the strip is small, and a hardware DC target would read back from the GPU on
+    // every paint.
+    const D2D1_RENDER_TARGET_PROPERTIES props{D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+                                              D2D1_PIXEL_FORMAT{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE},
+                                              96.0f, 96.0f, D2D1_RENDER_TARGET_USAGE_NONE,
+                                              D2D1_FEATURE_LEVEL_DEFAULT};
+    if (FAILED(factory->CreateDCRenderTarget(&props, target_.put()))) return false;
+    if (FAILED(target_->CreateSolidColorBrush(colour(theme_.text), brush_.put()))) {
+        target_.reset();
+        return false;
+    }
+    return true;
+}
+
+bool StripWindow::render(const RECT& dirty_in) noexcept {
+    if (!ensure_buffer(width_, height_) || !ensure_target()) return false;
+    RECT dirty{(std::max)(0L, dirty_in.left), (std::max)(0L, dirty_in.top), (std::min)(dirty_in.right, LONG{width_}),
+               (std::min)(dirty_in.bottom, LONG{height_})};
+    if (dirty.right <= dirty.left || dirty.bottom <= dirty.top) return true;
+
+    if (FAILED(target_->BindDC(mem_dc_, &dirty))) return false;
+    origin_x_ = static_cast<float>(dirty.left);
+    origin_y_ = static_cast<float>(dirty.top);
+    target_->BeginDraw();
+    target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
+    target_->SetTextAntialiasMode(cleartype_ ? D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE
+                                             : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    target_->Clear(colour(theme_.background));
+
+    for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
+        const RECT r = tab_rect(i);
+        if (intersects(r, dirty)) draw_tab(i);
+    }
+    if (layout_.overflow) {
+        const RECT r = chevron_rect();
+        if (intersects(r, dirty)) draw_chevron();
+    }
+
+    const HRESULT hr = target_->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) {
+        brush_.reset();
+        target_.reset();
+        return false;
+    }
+    return SUCCEEDED(hr);
+}
+
+void StripWindow::draw_tab(std::size_t index) noexcept {
+    const Item& item = items_[index];
+    const RECT r = tab_rect(index);
+    const bool active = index == active_;
+    const bool hover = index == hover_;
+    const D2D1::Matrix3x2F base = D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_);
+
+    // Work in a "frame": the tab as a horizontal rectangle, plus the edge facing the panel.
+    D2D1_RECT_F f{static_cast<float>(r.left), static_cast<float>(r.top), static_cast<float>(r.right),
+                  static_cast<float>(r.bottom)};
+    Edge edge = Edge::bottom;
+    switch (settings_.position) {
+    case StripPosition::top: edge = Edge::bottom; break;
+    case StripPosition::bottom: edge = Edge::top; break;
+    case StripPosition::left: edge = Edge::right; break;
+    case StripPosition::right: edge = Edge::left; break;
+    }
+    const bool turn = rotated();
+    if (turn) {
+        const float cx = (f.left + f.right) / 2.0f;
+        const float cy = (f.top + f.bottom) / 2.0f;
+        const float len = f.bottom - f.top;
+        const float across = f.right - f.left;
+        // Left strip reads bottom to top, right strip top to bottom; either way the frame's
+        // bottom edge ends up facing the panel.
+        const float angle = settings_.position == StripPosition::left ? -90.0f : 90.0f;
+        target_->SetTransform(D2D1::Matrix3x2F::Rotation(angle, D2D1::Point2F(cx, cy)) * base);
+        f = D2D1_RECT_F{cx - len / 2.0f, cy - across / 2.0f, cx + len / 2.0f, cy + across / 2.0f};
+        edge = Edge::bottom;
+    }
+    const bool frame_horizontal = edge == Edge::top || edge == Edge::bottom;
+
+    const float inset_along = static_cast<float>((std::max)(1, px(1)));
+    const float inset_across = static_cast<float>((std::max)(2, px(3)));
+    const float radius = static_cast<float>(px(settings_.corner_radius));
+    D2D1_RECT_F bg = f;
+    if (frame_horizontal) {
+        bg.left += inset_along;
+        bg.right -= inset_along;
+        bg.top += inset_across;
+        bg.bottom -= inset_across;
+    } else {
+        bg.left += inset_across;
+        bg.right -= inset_across;
+        bg.top += inset_along;
+        bg.bottom -= inset_along;
+    }
+
+    if (active && settings_.indicator == Indicator::pill) {
+        brush_->SetColor(colour(theme_.accent, theme_.dark ? 0.30f : 0.20f));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+    } else if (hover) {
+        brush_->SetColor(colour(theme_.text, theme_.dark ? 0.10f : 0.07f));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+    } else if (settings_.chip) {
+        brush_->SetColor(colour(theme_.text, 0.05f));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+    }
+
+    const int pad_x = px(settings_.pad_x);
+    if (active && settings_.indicator == Indicator::underline) {
+        const float bar = static_cast<float>((std::max)(2, px(2)));
+        D2D1_RECT_F u = f;
+        const float along_inset = static_cast<float>(pad_x) * 0.5f;
+        switch (edge) {
+        case Edge::bottom: u = {f.left + along_inset, f.bottom - bar, f.right - along_inset, f.bottom}; break;
+        case Edge::top: u = {f.left + along_inset, f.top, f.right - along_inset, f.top + bar}; break;
+        case Edge::right: u = {f.right - bar, f.top + inset_along * 2, f.right, f.bottom - inset_along * 2}; break;
+        case Edge::left: u = {f.left, f.top + inset_along * 2, f.left + bar, f.bottom - inset_along * 2}; break;
+        }
+        brush_->SetColor(colour(theme_.accent));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(u, bar / 2.0f, bar / 2.0f), brush_.get());
+    }
+
+    if (item.layout) {
+        float x = f.left + static_cast<float>(pad_x);
+        if (frame_horizontal) {
+            const float room = f.right - f.left;
+            x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - item.draw_width) / 2.0f));
+        }
+        const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
+        const COLORREF text = active || hover ? theme_.text : blend(theme_.text, theme_.background, 0.72f);
+        brush_->SetColor(colour(text));
+        target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
+        target_->DrawTextLayout(D2D1::Point2F(x, y), item.layout.get(), brush_.get(),
+                                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        target_->PopAxisAlignedClip();
+    }
+
+    if (active && focused_ && !hide_focus_) {
+        D2D1_RECT_F focus = bg;
+        focus.left += 0.5f;
+        focus.top += 0.5f;
+        focus.right -= 0.5f;
+        focus.bottom -= 0.5f;
+        brush_->SetColor(colour(theme_.text, 0.6f));
+        target_->DrawRoundedRectangle(D2D1::RoundedRect(focus, radius, radius), brush_.get(), 1.0f);
+    }
+
+    if (turn) target_->SetTransform(base);
+}
+
+void StripWindow::draw_chevron() noexcept {
+    const RECT r = chevron_rect();
+    const float cx = static_cast<float>(r.left + r.right) / 2.0f;
+    const float cy = static_cast<float>(r.top + r.bottom) / 2.0f;
+    if (chevron_hover_) {
+        const float h = static_cast<float>(px(11));
+        const D2D1_RECT_F bg{cx - h, cy - h, cx + h, cy + h};
+        const float radius = static_cast<float>(px(settings_.corner_radius));
+        brush_->SetColor(colour(theme_.text, theme_.dark ? 0.10f : 0.07f));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+    }
+    const float w = static_cast<float>(px(4));
+    const float stroke = (std::max)(1.0f, static_cast<float>(dpi_) / 96.0f * 1.5f);
+    brush_->SetColor(colour(blend(theme_.text, theme_.background, 0.8f)));
+    target_->DrawLine(D2D1::Point2F(cx - w, cy - w / 2.0f), D2D1::Point2F(cx, cy + w / 2.0f), brush_.get(), stroke);
+    target_->DrawLine(D2D1::Point2F(cx, cy + w / 2.0f), D2D1::Point2F(cx + w, cy - w / 2.0f), brush_.get(), stroke);
+}
+
+const std::uint8_t* StripWindow::pixels(int& width, int& height, int& stride) const noexcept {
+    width = width_;
+    height = height_;
+    stride = buffer_width_ * 4;
+    return static_cast<const std::uint8_t*>(bits_);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Window.
+
+LRESULT CALLBACK StripWindow::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) noexcept {
+    if (msg == WM_NCCREATE) {
+        auto* self = static_cast<StripWindow*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        self->wnd_ = wnd;
+        SetWindowLongPtrW(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    auto* self = reinterpret_cast<StripWindow*>(GetWindowLongPtrW(wnd, GWLP_USERDATA));
+    if (self == nullptr) return DefWindowProcW(wnd, msg, wp, lp);
+    if (msg == WM_NCDESTROY) {
+        SetWindowLongPtrW(wnd, GWLP_USERDATA, 0);
+        self->wnd_ = nullptr;
+        return DefWindowProcW(wnd, msg, wp, lp);
+    }
+    return self->on_message(msg, wp, lp);
+}
+
+LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
+    switch (msg) {
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: on_paint(); return 0;
+    case WM_SIZE: on_size(LOWORD(lp), HIWORD(lp)); return 0;
+    case WM_MOUSEMOVE: on_mouse_move(POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}); return 0;
+    case WM_MOUSELEAVE: on_mouse_leave(); return 0;
+    case WM_LBUTTONDOWN: on_button_down(POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}); return 0;
+    case WM_CONTEXTMENU: on_context_menu(lp); return 0;
+    case WM_MOUSEWHEEL: {
+        if (!settings_.wheel_cycles || listener_ == nullptr) break;
+        wheel_accumulator_ += GET_WHEEL_DELTA_WPARAM(wp);
+        while (wheel_accumulator_ >= WHEEL_DELTA) {
+            wheel_accumulator_ -= WHEEL_DELTA;
+            listener_->on_strip_step(-1);
+        }
+        while (wheel_accumulator_ <= -WHEEL_DELTA) {
+            wheel_accumulator_ += WHEEL_DELTA;
+            listener_->on_strip_step(+1);
+        }
+        return 0;
+    }
+    case WM_GETDLGCODE: return DLGC_WANTALLKEYS;
+    case WM_KEYDOWN:
+        if (on_key(wp)) return 0;
+        if (listener_ != nullptr && listener_->on_strip_key(msg, wp)) return 0;
+        break;
+    case WM_SYSKEYDOWN:
+        if (listener_ != nullptr && listener_->on_strip_key(msg, wp)) {
+            ignore_syschar_ = true;
+            return 0;
+        }
+        break;
+    case WM_SYSCHAR:
+        if (ignore_syschar_) {
+            ignore_syschar_ = false;
+            return 0;
+        }
+        break;
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        focused_ = msg == WM_SETFOCUS;
+        invalidate_tab(active_);
+        break;
+    case WM_UPDATEUISTATE: {
+        const LRESULT result = DefWindowProcW(wnd_, msg, wp, lp);
+        const bool hide = (SendMessageW(wnd_, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) != 0;
+        if (hide != hide_focus_) {
+            hide_focus_ = hide;
+            invalidate_tab(active_);
+        }
+        return result;
+    }
+    case wm_dpichanged_afterparent: check_dpi(); return 0;
+    case WM_SETTINGCHANGE:
+        if (const bool ct = gfx::system_uses_cleartype(); ct != cleartype_) {
+            cleartype_ = ct;
+            InvalidateRect(wnd_, nullptr, FALSE);
+        }
+        break;
+    default: break;
+    }
+    return DefWindowProcW(wnd_, msg, wp, lp);
+}
+
+void StripWindow::on_paint() noexcept {
+    PAINTSTRUCT ps{};
+    const HDC dc = BeginPaint(wnd_, &ps);
+    if (dc == nullptr) return;
+    const RECT& rc = ps.rcPaint;
+    if (rc.right > rc.left && rc.bottom > rc.top) {
+        const bool measure = perf::enabled();
+        const std::uint64_t start = measure ? perf::now() : 0;
+        const std::uint64_t allocations = measure ? perf::allocation_count() : 0;
+        if (render(rc)) {
+            BitBlt(dc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, mem_dc_, rc.left, rc.top, SRCCOPY);
+        } else {
+            // Lost target or no Direct2D: flat background now, a full retry next time.
+            const HBRUSH brush = CreateSolidBrush(theme_.background);
+            FillRect(dc, &rc, brush);
+            DeleteObject(brush);
+            if (!target_) InvalidateRect(wnd_, nullptr, FALSE);
+        }
+        if (measure) {
+            const auto area = static_cast<std::uint64_t>(rc.right - rc.left) * static_cast<std::uint64_t>(rc.bottom - rc.top);
+            stats_.add(perf::elapsed_ms(start, perf::now()), perf::allocation_count() - allocations, area);
+        }
+    }
+    EndPaint(wnd_, &ps);
+}
+
+void StripWindow::check_dpi() noexcept {
+    if (wnd_ == nullptr) return;
+    const unsigned dpi = gfx::window_dpi(wnd_);
+    if (dpi == dpi_) return;
+    dpi_ = dpi;
+    rebuild_text_format();
+    rebuild_items();
+    update_thickness();
+    relayout();
+    InvalidateRect(wnd_, nullptr, FALSE);
+    if (listener_ != nullptr) listener_->on_strip_metrics_changed();
+}
+
+void StripWindow::on_size(int width, int height) noexcept {
+    check_dpi();
+    if (width == width_ && height == height_) return;
+    width_ = width;
+    height_ = height;
+    (void)ensure_buffer(width, height); // here, so WM_PAINT never allocates
+    relayout();
+    InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::on_mouse_move(POINT pt) noexcept {
+    if (!tracking_) {
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, wnd_, 0};
+        tracking_ = TrackMouseEvent(&tme) != FALSE;
+    }
+    const std::size_t hover = hit_test(pt);
+    const bool chevron = chevron_hit(pt);
+    if (hover != hover_) {
+        const std::size_t old = hover_;
+        hover_ = hover;
+        invalidate_tab(old);
+        invalidate_tab(hover);
+    }
+    if (chevron != chevron_hover_) {
+        chevron_hover_ = chevron;
+        const RECT r = chevron_rect();
+        InvalidateRect(wnd_, &r, FALSE);
+    }
+}
+
+void StripWindow::on_mouse_leave() noexcept {
+    tracking_ = false;
+    if (hover_ != no_index) {
+        const std::size_t old = hover_;
+        hover_ = no_index;
+        invalidate_tab(old);
+    }
+    if (chevron_hover_) {
+        chevron_hover_ = false;
+        const RECT r = chevron_rect();
+        InvalidateRect(wnd_, &r, FALSE);
+    }
+}
+
+void StripWindow::on_button_down(POINT pt) noexcept {
+    if (listener_ == nullptr) return;
+    if (chevron_hit(pt)) {
+        const RECT r = chevron_rect();
+        POINT screen{horizontal() ? r.left : r.right, horizontal() ? r.bottom : r.top};
+        ClientToScreen(wnd_, &screen);
+        listener_->on_strip_overflow(screen);
+        return;
+    }
+    const std::size_t index = hit_test(pt);
+    if (index != no_index && index != active_) listener_->on_strip_activate(index);
+}
+
+void StripWindow::on_context_menu(LPARAM lp) noexcept {
+    if (listener_ == nullptr) return;
+    POINT screen{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    std::size_t index = no_index;
+    if (screen.x == -1 && screen.y == -1) {
+        // Keyboard: open below the active tab.
+        index = active_;
+        const RECT r = active_ != no_index ? tab_rect(active_) : RECT{};
+        screen = POINT{r.left, r.bottom};
+        ClientToScreen(wnd_, &screen);
+    } else {
+        POINT client = screen;
+        ScreenToClient(wnd_, &client);
+        index = hit_test(client);
+    }
+    listener_->on_strip_menu(index, screen);
+}
+
+bool StripWindow::on_key(WPARAM key) noexcept {
+    if (listener_ == nullptr) return false;
+    switch (key) {
+    case VK_LEFT:
+    case VK_UP: listener_->on_strip_step(-1); return true;
+    case VK_RIGHT:
+    case VK_DOWN: listener_->on_strip_step(+1); return true;
+    case VK_HOME:
+        if (!items_.empty()) listener_->on_strip_activate(0);
+        return true;
+    case VK_END:
+        if (!items_.empty()) listener_->on_strip_activate(items_.size() - 1);
+        return true;
+    default: return false;
+    }
+}
+
+} // namespace bettertabs

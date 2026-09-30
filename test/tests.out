@@ -1,0 +1,47 @@
+== codec == 
+ok    defaults round-trip
+ok    empty children round-trip
+ok    every setting round-trips
+ok    child count
+ok    child GUIDs
+ok    child configs
+ok    active index
+ok    tab extra round-trips
+ok    empty tab extra reads as defaults
+ok    unknown setting kept
+ok    unknown section kept
+ok    known settings unaffected by unknown ones
+ok    second save is byte-identical
+ok    all truncations decode safely
+ok    bad magic -> defaults
+ok    empty blob -> defaults
+ok    absurd child count is harmless
+ok    invalid enum keeps default
+ok    numeric setting clamped
+ok    unreadable settings -> defaults
+ok    children survive a newer min reader
+ok    unknown tab extra field kept
+PASS (0 failures)
+== layout == 
+ok    fit: all visible
+ok    fit: positions
+ok    end alignment touches the far edge
+ok    centre alignment
+ok    equal: widest wins
+ok    fill: exactly fills, remainder distributed
+ok    overflow detected
+ok    active stays visible
+ok    chevron at the end
+ok    visible tabs clear the chevron
+ok    off-window tabs have no length
+ok    hit test finds the active tab
+ok    hit test on the chevron is no tab
+ok    single huge tab clipped
+ok    hit test in the gap is no tab
+ok    hit test edges
+ok    hit test outside
+ok    zero length: nothing placed
+ok    no tabs
+ok    output storage reused
+PASS (0 failures)
+EXIT=0 0 

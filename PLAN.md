@@ -1,7 +1,9 @@
-# foo_bettertab - plan
+# foo_bettertabs ("Better Tabs") - plan
 
 A modern tab container for Columns UI. It hosts other panels, shows one at a time, and replaces the
-built-in *Tab stack*. Status: **plan, waiting for approval. No code yet.**
+built-in *Tab stack* (both can coexist). Status: **M(a) implemented (0.1.0), awaiting the user's test
+run.** Decisions Q1-Q6 are in section 11; where this file and the code disagree, the code wins
+(settings ids: `src/model/codec.cpp`).
 
 Ground truth: `SDK-2026-09-17/` (fb2k SDK 20260917), `SDK-2026-09-17/columns_ui-sdk/` (CUI SDK 8.1.0),
 `wtl/Include` (WTL 10.01). Where it helped, the real Tab stack source was read too:
@@ -29,7 +31,7 @@ Every rule below is quoted from a header (or the CUI source where marked) and ha
 | --- | --- | --- | --- |
 | H1 | Host must not be dialog managed | `window_host.h:16` | No `IsDialogMessage`, no `modeless_dialog_manager` on the container. Tab keys handled by hand (H6). |
 | H2 | Host must forward `WM_SETTINGCHANGE`, `WM_SYSCOLORCHANGE`, `WM_TIMECHANGE` to hosted windows | `window_host.h:18-21` | Children are **direct children** of the container window, so `container_window_v3` forwards to all of them, hidden ones included (`container_window_v3.cpp:70-73`). The strip is a direct child too and uses `WM_SETTINGCHANGE` to refresh ClearType params. The Win7 overlay popup (5.4) is not a child; we forward to it by hand. |
-| H3 | `request_resize` is all-or-nothing | `window_host.h:62-64` | Only for the **active** child. Translate the child size to ours (add strip thickness on the strip axis), ask our host with the same flags if our host's `is_resize_supported()` covers **all** of them, else return `false` and change nothing. Inactive child: `false`. (Tab stack always returns `false`; we do better but stay inside the rule.) |
+| H3 | `request_resize` is all-or-nothing | `window_host.h:62-64` | **Decided (Q4): always `false`, `is_resize_supported` 0**, exactly like Tab stack. |
 | H4 | `is_visible` may be false while `WS_VISIBLE` is set | `window_host.h:128-136` | `is_visible(w) = our host->is_visible(us) && w is the active tab && strip/auto-hide state does not cover it`. Inactive tabs are `SW_HIDE`d as well, so `IsWindowVisible` agrees and children that check it (foo_mediabar does) pause. |
 | H5 | `is_visibility_modifiable` / `set_window_visibility` | `window_host.h:138-160` | Same semantics as Tab stack (`splitter_tabs.cpp:92-126`): hiding is never allowed (`false`); showing means "switch to this tab", after asking our own host to show us if we are hidden. |
 | H6 | Tab key must work: `g_on_tab()` when neither the shortcut manager nor a dialog manager took `VK_TAB` | `window_host.h:94-111`, `window.h:273` | Strip `WM_KEYDOWN`: shortcut manager first (only if `get_keyboard_shortcuts_enabled()`), then `VK_TAB` -> `uie::window::g_on_tab(strip)`. Container has `WS_EX_CONTROLPARENT`; strip has `WS_TABSTOP`. |
@@ -47,7 +49,7 @@ Every rule below is quoted from a header (or the CUI source where marked) and ha
 | H18 | `on_bool_changed` carries a mask, not values | `colours.h:105` | Re-read `is_dark_mode_active()`. |
 | H19 | FCL feedback: import reports only missing panels, export reports all | `columns_ui.h:240-250` | `import_config`/`export_config` walk children and forward to each child's own `import_config`/`export_config`, and report child GUIDs. |
 | H20 | Custom title as config items | `splitter.h:283-293`; Tab stack `splitter_tabs.cpp:300-330` | `get_config_item_supported` for `bool_use_custom_title`, `string_custom_title` and `bool_hidden`, so the Layout page's own title/hide commands work on our children. |
-| H21 | `splitter_window_v2`: `is_point_ours`, `get_supported_panels` | `splitter.h:434-470` | Implemented, so live layout editing can reach children. `get_supported_panels` calls `is_available(our host)` per window. |
+| H21 | `splitter_window_v2`: `is_point_ours`, `get_supported_panels` | `splitter.h:434-470` | `get_supported_panels` calls `is_available(host)` per window (an ownerless host before the window exists). `is_point_ours` is **not** overridden - Tab stack doesn't either, and live editing works through the children. |
 | B1 | `inMainThread` queues, `inMainThread2` doesn't | fb2k `sdk-quirks.md` | Cover accent result comes back with `inMainThread`. |
 | B2 | No `play_callback_impl_base` statically; no replay on register | `play_callback.h:78-88` | One lazily created shared play callback, registered only while an instance needs it (title-format titles with track fields, follow-playback, cover accent); reads current state on register. |
 | B3 | `now_playing_album_art_notify_manager::add(std::function)` leaks with `remove()` | fb2k `entry-points.md` | Inherit `now_playing_album_art_notify`; add/remove `this`. |
@@ -376,14 +378,14 @@ the numbers go into README "Performance" and this file.
 ## 8. Repo, build, release
 
 - Own git repo, `.gitattributes` pinning line endings (first commit after the plan, like
-  foo_mediabar). Layout: `build.bat`, `package.bat`, `foo_bettertab.vcxproj`, `.rc`, `resource.h`,
+  foo_mediabar). Layout: `build.bat`, `package.bat`, `foo_bettertabs.vcxproj`, `.rc`, `resource.h`,
   `src/...`, `test/`, `docs/images/`, `README.md`, `PLAN.md`, `TASK.md` (handoff state), `PROMPT.md`
   (your brief, verbatim).
 - `build.bat [Release|Debug] [x64|Win32]` and `package.bat [x64|both]` copied from foo_mediabar;
   `package.bat both` is the default for releases here since x86 is required. Plus a `dumpbin -imports`
   check for post-Win7 imports that fails the build.
 - Version `0.1.0` -> milestones bump minor; `src/version.h`, one `DECLARE_COMPONENT_VERSION`,
-  `VALIDATE_COMPONENT_FILENAME("foo_bettertab.dll")`. PDBs archived in `dist/symbols`.
+  `VALIDATE_COMPONENT_FILENAME("foo_bettertabs.dll")`. PDBs archived in `dist/symbols`.
 - Commit style: `M<n>: summary` or `<version>: summary`, then a short bullet body (foo_mediabar).
 - Offline tests in `test/`: blob codec (round-trip, truncated, unknown section, newer version,
   downgrade), extra-data codec, strip layout (fit/equal/fill x 4 positions x 0/1/30 tabs x 3 DPIs),
@@ -425,14 +427,22 @@ To add once verified in a build (AGENTS.md: verify before writing):
 
 ## 11. Open decisions (need your answer before M(a))
 
-- **Q1 Renderer.** D2D `DCRenderTarget` into one DIB (plan above) vs plain GDI. GDI is simpler and
-  smaller but gives jagged rounded corners and pills. I recommend D2D.
-- **Q2 Win7 overlay.** Owned layered popup fallback (plan) vs plain child strip on Win7 (simpler,
-  but the child repaints the covered strip area on hide). I recommend the popup, Win7 only.
-- **Q3 Ctrl+Tab** from inside a child needs fb2k's `message_filter` (not a Windows hook, filtered to
-  `WM_KEYDOWN` only). OK, or restrict Ctrl+Tab to when the strip has focus?
-- **Q4 `request_resize`**: forward for the active child (plan) or always `false` like Tab stack?
-- **Q5 Name** in the Layout tree: "Better tab" (category Splitters/Containers)? And should the
-  README/package say it *replaces* Tab stack, or can both coexist (they can, technically)?
-- **Q6 x86 target version**: keep `FOOBAR2000_TARGET_VERSION 81` for both (v2 only), or 80 for x86
-  so it also loads in v1.6?
+## 11. Decisions (answered before M(a))
+
+- **Q1 Renderer:** Direct2D. Software `ID2D1DCRenderTarget`, `D2D1_ALPHA_MODE_IGNORE` (opaque, so
+  ClearType stays available), bound to the dirty rectangle of one persistent DIB.
+- **Q2 Win7 overlay:** owned layered popup on Windows 7, layered child on 8+ (M(d)).
+- **Q3 Ctrl+Tab:** the `message_filter` (`WM_KEYDOWN` only), in M(c). Low complexity.
+- **Q4 `request_resize`:** always `false`, like Tab stack.
+- **Q5 Name:** `foo_bettertabs`, "Better Tabs", category Splitters; coexists with Tab stack.
+- **Q6 Target:** v2 only; the SDK default `FOOBAR2000_TARGET_VERSION 81` for both architectures.
+
+## 12. Implementation notes (M(a))
+
+- `src/strip/` (StripWindow, strip_layout) has no SDK dependency; `src/hosts/container.cpp` is the
+  only Columns UI code. Colour and font clients already exist (entries on CUI's pages).
+- A tab's extension **object** is created with the container (it gives the label and
+  `is_available`); its **window** only on first activation. Missing or unavailable panels keep
+  their GUID and config but get no tab (Tab stack behaviour).
+- Foreign splitter items: custom title is taken, `m_hidden` is not (it means "collapsed" there).
+- Offline tests: `test/build_tests.bat` (codec + layout).

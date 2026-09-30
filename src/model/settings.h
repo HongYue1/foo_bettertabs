@@ -1,0 +1,71 @@
+#pragma once
+
+// Per-instance settings. Plain values with explicit defaults; no SDK, no Win32, so the codec and
+// the offline tests can use it. Stored field by field (codec.cpp), never as a raw struct, so
+// adding a field never invalidates an older layout and an older build can read a newer one.
+
+#include <cstdint>
+
+namespace bettertabs {
+
+enum class StripPosition : std::uint8_t { top, bottom, left, right };
+enum class SideText : std::uint8_t { horizontal, rotated };
+enum class TabSizing : std::uint8_t { fit, equal, fill };
+enum class TabAlign : std::uint8_t { start, centre, end };
+enum class StripVisibility : std::uint8_t { always, never, two_or_more, auto_hide };
+enum class Indicator : std::uint8_t { underline, pill, none };
+enum class AccentSource : std::uint8_t { selection, custom, cover };
+enum class MiddleClick : std::uint8_t { nothing, hide_tab, remove_tab };
+enum class RevealMode : std::uint8_t { overlay, push };
+enum class ShowHideAnimation : std::uint8_t { none, slide, fade };
+
+//! "No tab" for the follow-playback targets.
+inline constexpr std::uint16_t no_tab = 0xFFFF;
+
+struct Settings {
+    StripPosition position{StripPosition::top};
+    SideText side_text{SideText::horizontal};
+    TabSizing sizing{TabSizing::fit};
+    TabAlign align{TabAlign::start};
+
+    // Metrics, all in DIPs.
+    std::uint16_t pad_x{12};
+    std::uint16_t pad_y{6};
+    std::uint16_t spacing{2};
+    //! Strip thickness; 0 = from the font.
+    std::uint16_t thickness{0};
+
+    StripVisibility visibility{StripVisibility::always};
+    Indicator indicator{Indicator::underline};
+    AccentSource accent_source{AccentSource::selection};
+    //! 0xAARRGGBB, used when accent_source == custom.
+    std::uint32_t accent_argb{0xFF3EA6FFu};
+    std::uint16_t corner_radius{4};
+    bool chip{false};
+    bool animations{false};
+    std::uint16_t animation_ms{150};
+
+    bool wheel_cycles{true};
+    MiddleClick middle_click{MiddleClick::nothing};
+    bool drag_reorder{true};
+    //! Create a child's window on first activation (true) or all at once (false).
+    bool lazy_children{true};
+    bool remember_active{true};
+    std::uint16_t follow_play_tab{no_tab};
+    std::uint16_t follow_stop_tab{no_tab};
+
+    // Auto-hide.
+    std::uint16_t hot_zone{4};
+    std::uint16_t reveal_delay_ms{0};
+    std::uint16_t hide_delay_ms{400};
+    std::uint16_t linger_ms{700};
+    RevealMode reveal_mode{RevealMode::overlay};
+    ShowHideAnimation show_hide_animation{ShowHideAnimation::none};
+
+    [[nodiscard]] bool operator==(const Settings&) const = default;
+};
+
+//! Pulls every numeric field into its supported range. Enums are range-checked by the codec.
+void clamp(Settings& settings) noexcept;
+
+} // namespace bettertabs

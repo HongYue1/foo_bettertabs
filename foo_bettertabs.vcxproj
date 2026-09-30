@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{3F6C2B8E-51D4-4C0A-9E77-2A8B64D1C5F3}</ProjectGuid>
+    <RootNamespace>foo_bettertabs</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Label="UserMacros">
+    <!-- The workspace SDK, not a vendored copy. See ../AGENTS.md. -->
+    <SdkRoot>..\SDK-2026-09-17</SdkRoot>
+    <!-- The SDK libs expose the /MT flavour as a separate configuration. build.bat builds them. -->
+    <SdkLibConfiguration Condition="'$(Configuration)'=='Release'">Release-Static</SdkLibConfiguration>
+    <SdkLibConfiguration Condition="'$(Configuration)'=='Debug'">Debug</SdkLibConfiguration>
+    <SdkLibSubDir Condition="'$(Platform)'=='x64'">x64\$(SdkLibConfiguration)</SdkLibSubDir>
+    <SdkLibSubDir Condition="'$(Platform)'=='Win32'">$(SdkLibConfiguration)</SdkLibSubDir>
+    <!-- The Columns UI SDK has no Release-Static configuration; its Release is already /MT.
+         Its TargetName is columns_ui_sdk, so the output is columns_ui_sdk.lib. -->
+    <CuiLibConfiguration>$(Configuration)</CuiLibConfiguration>
+    <CuiLibSubDir Condition="'$(Platform)'=='x64'">x64\$(CuiLibConfiguration)</CuiLibSubDir>
+    <CuiLibSubDir Condition="'$(Platform)'=='Win32'">$(CuiLibConfiguration)</CuiLibSubDir>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetName>foo_bettertabs</TargetName>
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\obj\</IntDir>
+    <LinkIncremental Condition="'$(Configuration)'=='Release'">false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <!-- /W4-as-errors is for our code. SDK and Windows headers arrive through angle includes. -->
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalIncludeDirectories>$(SdkRoot)\foobar2000;$(SdkRoot);..\wtl\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- Mandatory for anything compiling SDK headers; without it release-only miscompiles. -->
+      <AdditionalOptions>/d2notypeopt %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>$(SdkRoot)\pfc\$(SdkLibSubDir)\pfc.lib;$(SdkRoot)\foobar2000\SDK\$(SdkLibSubDir)\foobar2000_SDK.lib;$(SdkRoot)\foobar2000\helpers\$(SdkLibSubDir)\foobar2000_sdk_helpers.lib;$(SdkRoot)\libPPUI\$(SdkLibSubDir)\libPPUI.lib;$(SdkRoot)\foobar2000\foobar2000_component_client\$(SdkLibSubDir)\foobar2000_component_client.lib;$(SdkRoot)\columns_ui-sdk\$(CuiLibSubDir)\columns_ui_sdk.lib;$(SdkRoot)\foobar2000\shared\shared-$(Platform).lib;d2d1.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <PreprocessorDefinitions>_DEBUG;_WINDLL;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <!-- Static CRT: users need no redistributable. Pairs with the SDK's Release-Static libs. -->
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <StringPooling>true</StringPooling>
+      <!-- Keep frame pointers so crash stacks from users are walkable. -->
+      <OmitFramePointers>false</OmitFramePointers>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <!-- windows.h min/max macros break std::max and std::clamp at the call site. -->
+      <PreprocessorDefinitions>NDEBUG;_WINDLL;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\component.cpp" />
+    <ClCompile Include="src\hosts\container.cpp" />
+    <ClCompile Include="src\model\codec.cpp" />
+    <ClCompile Include="src\platform\alloc_counter.cpp" />
+    <ClCompile Include="src\platform\graphics.cpp" />
+    <ClCompile Include="src\platform\logging.cpp" />
+    <ClCompile Include="src\platform\perf.cpp" />
+    <ClCompile Include="src\strip\strip_layout.cpp" />
+    <ClCompile Include="src\strip\strip_window.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\guids.h" />
+    <ClInclude Include="src\version.h" />
+    <ClInclude Include="src\model\codec.h" />
+    <ClInclude Include="src\model\settings.h" />
+    <ClInclude Include="src\platform\com_ptr.h" />
+    <ClInclude Include="src\platform\graphics.h" />
+    <ClInclude Include="src\platform\logging.h" />
+    <ClInclude Include="src\platform\perf.h" />
+    <ClInclude Include="src\strip\strip_layout.h" />
+    <ClInclude Include="src\strip\strip_window.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

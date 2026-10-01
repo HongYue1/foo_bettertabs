@@ -32,17 +32,15 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   only the indicator slides. Confirmed. **0.4.0 released (M(d) done).**
 - **0.5.0 beta 1** (M(e)): `TabsCore` refactor (CUI host now ~700 lines) and the Default UI
   element (PLAN.md section 14, "0.5.0 beta 1"). Built x64 + Win32, 0 warnings, tests pass, 0
-  dialog problems. Not yet tested by the user.
+  dialog problems. Confirmed by the user (CUI regression, DUI editing and use; clean console in a
+  portable Default UI install). **0.5.0 released (M(e) done).**
 
 ## Waiting for
 
 - Optional: the 16.9 ms still in "after WM_CREATE" of the first container (not chased).
-- Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
 
 ## Next
 
-- User test of 0.5.0 beta 1: Columns UI regression and the Default UI element (adding, edit
-  menus, colours/fonts/dark mode, focus, Ctrl+Tab, nesting, missing elements). Fixes, then 0.5.0.
 - README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
   semantics, Tab stack host behaviour and is_point_ours, transparent children forward
   WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then

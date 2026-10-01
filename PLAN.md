@@ -627,3 +627,5 @@ To add once verified in a build (AGENTS.md: verify before writing):
   destructor does it, with `dying_` blocking anything that would AddRef a zero-count object.
 - A missing element's tab shows "(missing element)"; its config is kept (the dummy's own config
   is ignored because its GUID differs).
+- User test of beta 1: all pass (CUI regression, DUI editing, appearance, focus, nesting, missing
+  elements); clean console in a portable Default UI install. Released as 0.5.0.

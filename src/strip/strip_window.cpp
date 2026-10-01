@@ -48,6 +48,22 @@ constexpr float wide_layout = 100000.0f;
 
 enum class Edge : std::uint8_t { top, bottom, left, right };
 
+//! The active tab's fill colour at `alpha`: the line accent for a faint wash (it carries the hue
+//! best when mostly the strip shows through), the fill accent from about 90% on, and an OKLCh
+//! blend between.
+[[nodiscard]] COLORREF accent_fill_colour(const StripTheme& theme, float alpha) noexcept {
+    if (theme.fill_accent == CLR_INVALID || theme.fill_accent == theme.accent) return theme.accent;
+    const float x = std::clamp((alpha - 0.30f) / (0.90f - 0.30f), 0.0f, 1.0f);
+    const float t = x * x * (3.0f - 2.0f * x);
+    if (t <= 0.0f) return theme.accent;
+    if (t >= 1.0f) return theme.fill_accent;
+    const colour::Lab a = colour::from_rgb(colour::rgb_from_colorref(theme.accent));
+    const colour::Lab b = colour::from_rgb(colour::rgb_from_colorref(theme.fill_accent));
+    const float L = a.L + (b.L - a.L) * t;
+    const float C = colour::chroma(a) + (colour::chroma(b) - colour::chroma(a)) * t;
+    return colour::colorref_from_rgb(colour::from_lch(L, C, colour::hue(b)));
+}
+
 // The look (PLAN.md 6.1). Overlay strengths are alpha of the text colour over the strip.
 constexpr float hover_alpha_dark = 0.08f;
 constexpr float hover_alpha_light = 0.06f;
@@ -602,6 +618,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     } else if (settings_.chip) {
         fill_alpha = chip_alpha;
     }
+    if (accent_fill) fill = accent_fill_colour(theme_, fill_alpha);
     if (fill_alpha > 0.0f) {
         brush_->SetColor(d2d_colour(fill, fill_alpha));
         target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());

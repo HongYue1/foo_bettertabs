@@ -472,3 +472,7 @@ To add once verified in a build (AGENTS.md: verify before writing):
   from 40% on the active text is picked for 4.5:1 against the fill), automatic light pill raised
   0.20 -> 0.26; strip background: Columns UI / tinted with the accent (12%) / custom (light or
   dark judged from the colour, text nudged to 4.5:1). Settings ids 30-33.
+- 0.2.2: on a light strip a cover accent is darkened for lines/text (yellow -> olive #8E7A00, as in
+  Media Bar); strong fills now use the cover's light-window colour (`accent_for_card(raw, false)`,
+  yellow stays #E5C71B with black text), blended in OKLCh from the line accent at 30% to the fill
+  accent at 90% (`StripTheme::fill_accent`).

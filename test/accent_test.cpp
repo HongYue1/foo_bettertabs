@@ -129,6 +129,19 @@ int main() {
         if (!none) ++failures;
     }
 
+    {
+        // A yellow cover on a light strip: the line accent goes dark (olive), the solid-fill
+        // accent keeps it yellow and carries black text.
+        const std::uint32_t yellow = 0xE6C81Eu;
+        const std::uint32_t line = colour::accent_for_background(yellow, 0xFFFFFFu);
+        const std::uint32_t fill = colour::accent_for_card(yellow, false);
+        const float L = colour::from_rgb(fill).L;
+        const float black = colour::contrast_ratio(0x000000u, fill);
+        const float dh = std::fabs(colour::hue(colour::from_rgb(fill)) - colour::hue(colour::from_rgb(yellow)));
+        std::printf("yellow on light: line %06X, fill %06X (L %.2f, black text %.1f:1, hue shift %.3f)\n", line,
+                    fill, L, black, dh);
+        if (L < 0.68f || black < 4.5f || dh > 0.05f) ++failures;
+    }
     std::printf("failures: %d\n", failures);
     return failures == 0 ? 0 : 1;
 }

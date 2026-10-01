@@ -1052,10 +1052,10 @@ void TabsContainer::refresh_colours() noexcept {
         // the user's choice and are only nudged when they would vanish.
         std::uint32_t accent = colour::rgb_from_colorref(colours.get_colour(cui::colours::colour_selection_background));
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
+        std::optional<std::uint32_t> cover_raw;
         if (settings_.accent_source == AccentSource::cover) {
-            if (const auto raw = cover::current(); raw) {
-                accent = colour::accent_for_background(*raw, bg);
-            }
+            cover_raw = cover::current();
+            if (cover_raw) accent = colour::accent_for_background(*cover_raw, bg);
         }
         accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
 
@@ -1074,6 +1074,11 @@ void TabsContainer::refresh_colours() noexcept {
         }
         theme.background = colour::colorref_from_rgb(bg);
         theme.accent = colour::colorref_from_rgb(accent);
+        if (cover_raw && colour::lightness(bg) >= colour::light_background_lightness) {
+            // A solid fill on a light strip: the cover's colour in the light window (yellow stays
+            // yellow instead of going olive); the strip picks dark text for it.
+            theme.fill_accent = colour::colorref_from_rgb(colour::accent_for_card(*cover_raw & 0xFFFFFFu, false));
+        }
 
         background_ = panel;
         strip_.set_theme(theme);

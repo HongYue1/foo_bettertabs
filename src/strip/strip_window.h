@@ -33,6 +33,11 @@ struct StripTheme {
     COLORREF text{RGB(0, 0, 0)};
     //! Already made legible against the background by the host.
     COLORREF accent{RGB(0, 120, 215)};
+    //! The accent for a strong fill behind text (pill, chip at high strength), or CLR_INVALID
+    //! to use `accent`. On a light strip a cover accent has to be dark to read as a line or as
+    //! text, and a dark yellow is olive; a fill carries black text, so it can keep the cover's
+    //! own light colour. The strip moves from `accent` to this as the fill gets stronger.
+    COLORREF fill_accent{CLR_INVALID};
     bool dark{false};
     //! Lift the strip slightly off a dark background (the Columns UI background only; a custom
     //! or tinted strip background is used as given).

@@ -108,6 +108,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\component.cpp" />
+    <ClCompile Include="src\hosts\configure_dialog.cpp" />
     <ClCompile Include="src\hosts\container.cpp" />
     <ClCompile Include="src\model\codec.cpp" />
     <ClCompile Include="src\model\cover_accent.cpp" />
@@ -131,6 +132,12 @@
     <ClInclude Include="src\platform\perf.h" />
     <ClInclude Include="src\strip\strip_layout.h" />
     <ClInclude Include="src\strip\strip_window.h" />
+    <ClInclude Include="src\hosts\configure_dialog.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <!-- The Configure and Rename dialogs. One .rc, hand-written; see resource.h for the IDs. -->
+  <ItemGroup>
+    <ResourceCompile Include="foo_bettertabs.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

@@ -55,6 +55,8 @@ public:
     void on_strip_overflow(POINT) noexcept override {}
     bool on_strip_key(UINT, WPARAM) noexcept override { return false; }
     void on_strip_metrics_changed() noexcept override {}
+    void on_strip_middle_click(std::size_t) noexcept override {}
+    void on_strip_reorder(std::size_t, std::size_t) noexcept override {}
 };
 
 struct Canvas {
@@ -116,7 +118,12 @@ struct Look {
     int width_dip;     // strip length
     StripPosition position{StripPosition::top};
     SideText side{SideText::horizontal};
+    //! 0 labels only, 1 icon + label, 2 icons only.
+    int icons{0};
 };
+
+//! Fluent/MDL2 code points, and one emoji (U+1F3B5) through the label font's fallback.
+const std::vector<std::wstring> icons = {L"\xE8D6", L"\xD83C\xDFB5", L"\xE946", L"\xE8B7", L"\xE8A9", L"\xE80F"};
 
 const std::vector<std::wstring> labels = {L"Artwork view", L"ESLyric", L"Item properties",
                                           L"Album list",   L"Column",  L"Row"};
@@ -136,12 +143,16 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         {"light underline", false, Indicator::underline, false, no_index, 560},
         {"light pill", false, Indicator::pill, false, 1, 560},
         {"light chips", false, Indicator::none, true, no_index, 560},
+        {"dark icons", true, Indicator::underline, false, no_index, 560, StripPosition::top, SideText::horizontal, 1},
+        {"light icon pill", false, Indicator::pill, false, no_index, 560, StripPosition::top, SideText::horizontal, 1},
     };
     const std::vector<Look> sides = {
         {"dark left", true, Indicator::underline, false, 1, 260, StripPosition::left, SideText::horizontal},
         {"dark left rotated", true, Indicator::pill, false, no_index, 400, StripPosition::left, SideText::rotated},
         {"light right rotated", false, Indicator::underline, false, no_index, 400, StripPosition::right,
          SideText::rotated},
+        {"dark left icons only", true, Indicator::pill, false, no_index, 260, StripPosition::left,
+         SideText::horizontal, 2},
     };
 
     const auto px = [dpi](int dip) { return MulDiv(dip, static_cast<int>(dpi), 96); };
@@ -177,7 +188,17 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         font.family = L"Segoe UI";
         font.size_dip = 12.0f; // 9 pt, Columns UI's default label font
         strip.set_font(font);
-        strip.set_labels(labels, 1);
+        if (look.icons == 0) {
+            strip.set_labels(labels, 1);
+        } else {
+            std::vector<StripItem> items(labels.size());
+            for (std::size_t i = 0; i < items.size(); ++i) {
+                items[i].label = look.icons == 2 ? std::wstring() : labels[i];
+                items[i].icon = icons[i % icons.size()];
+                items[i].tooltip = labels[i];
+            }
+            strip.set_items(items, 1);
+        }
         const bool horizontal = look.position == StripPosition::top || look.position == StripPosition::bottom;
         const int w = horizontal ? px(look.width_dip) : strip.thickness();
         const int h = horizontal ? strip.thickness() : px(look.width_dip);

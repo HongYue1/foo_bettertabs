@@ -11,20 +11,20 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   import/export through the children, `reorder_panels`, config items (custom title, hidden),
   colour and font clients, perf logging (advconfig Display > "Better Tabs: log performance...").
   Builds x64 and Win32, imports clean, offline tests pass (`test/build_tests.bat`).
-
 - **0.1.1**: Tab stack `is_point_ours` semantics; container paints background for transparent
   children. Confirmed by the user.
-- **M(b) 0.2.0**: appearance (PLAN.md section 13): accent sources incl. cover hub, CUI DWrite
-  font + rendering options, indicator styles, chips, side strips, tab width modes, Appearance
-  submenu as interim UI, render + accent tests.
+- **M(b) 0.2.0-0.2.2**: appearance (PLAN.md section 13). Confirmed by the user.
+- **M(c) 0.3.0**: Configure dialog, rename, icons, title formatting, middle click, drag reorder,
+  Ctrl+Tab, follow playback, hidden tabs menu (PLAN.md section 14).
 
 ## Waiting for
 
-- The user's M(b) test run (checklist in the M(b) hand-off message).
+- The user's M(c) test run, including screenshots of every Configure page in light and dark mode.
 
 ## Next
 
-- M(c): Configure dialog, title-format titles, icons, middle click, drag reorder, Ctrl+Tab filter,
-  follow playback.
-- M(d): auto-hide + animations.
-- Skill updates listed in PLAN.md section 10, once the user's test confirms them.
+- M(d): auto-hide + animations (an Auto-hide page in the Configure dialog).
+- README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
+  semantics, Tab stack host behaviour and is_point_ours, transparent children forward
+  WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then
+  get_config; ListView vs dark-mode hooks).

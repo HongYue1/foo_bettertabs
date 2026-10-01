@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../model/settings.h"
@@ -73,6 +74,20 @@ struct StripTextOptions {
     com_ptr<IDWriteRenderingParams> params;
 };
 
+//! One tab as the host describes it.
+struct StripItem {
+    std::wstring label;
+    //! One glyph (one or two UTF-16 units), or empty. A Private Use Area code point is drawn
+    //! with `icon_font` or, when that is empty, the system icon font (Segoe Fluent Icons, Segoe
+    //! MDL2 Assets, Segoe UI Symbol: the first one installed); anything else with the label font
+    //! and its fallback, so emoji work.
+    std::wstring icon;
+    std::wstring icon_font;
+    //! Shown on hover when the label is clipped or empty. Usually the full title.
+    std::wstring tooltip;
+    [[nodiscard]] bool operator==(const StripItem&) const = default;
+};
+
 class StripListener {
 public:
     virtual void on_strip_activate(std::size_t index) noexcept = 0;
@@ -86,6 +101,11 @@ public:
     virtual bool on_strip_key(UINT message, WPARAM key) noexcept = 0;
     //! The strip's thickness changed (font, DPI, settings): the host must lay out again.
     virtual void on_strip_metrics_changed() noexcept = 0;
+    //! Middle click on a tab.
+    virtual void on_strip_middle_click(std::size_t index) noexcept = 0;
+    //! A drag moved tab `from` to position `to` (strip indices, both before the move). The strip
+    //! already shows the new order; the host makes it real and sends the tabs again.
+    virtual void on_strip_reorder(std::size_t from, std::size_t to) noexcept = 0;
 
 protected:
     ~StripListener() = default;
@@ -107,7 +127,9 @@ public:
     void set_theme(const StripTheme& theme) noexcept;
     void set_font(const StripFont& font) noexcept;
     void set_text_options(const StripTextOptions& options) noexcept;
-    //! Replaces all tabs. Rebuilds their text layouts, so only call it when a label changed.
+    //! Replaces all tabs. Rebuilds the text layouts of the tabs that changed.
+    void set_items(std::span<const StripItem> items, std::size_t active) noexcept;
+    //! Labels only (the offline render test).
     void set_labels(std::span<const std::wstring> labels, std::size_t active) noexcept;
     //! Cheap: invalidates the old and new active tab only (unless the visible range moves).
     void set_active(std::size_t active) noexcept;
@@ -131,12 +153,20 @@ public:
 
 private:
     struct Item {
-        std::wstring label;
+        StripItem spec;
         com_ptr<IDWriteTextLayout> layout;
         int text_width{0};
         int text_height{0};
         //! Text width actually drawn: text_width, or less when the tab is clipped (ellipsis).
         int draw_width{0};
+        com_ptr<IDWriteTextLayout> icon_layout;
+        int icon_width{0};
+        int icon_height{0};
+        //! Space between the icon and the label (0 without either).
+        int icon_gap{0};
+        //! Built for this font/DPI generation; a newer generation rebuilds the layouts.
+        unsigned generation{0};
+        [[nodiscard]] int content_width() const noexcept { return icon_width + icon_gap + text_width; }
     };
 
     static LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) noexcept;
@@ -147,15 +177,26 @@ private:
     void on_mouse_move(POINT pt) noexcept;
     void on_mouse_leave() noexcept;
     void on_button_down(POINT pt) noexcept;
+    void on_button_up(POINT pt) noexcept;
+    void on_middle_up(POINT pt) noexcept;
+    void drag_to(POINT pt) noexcept;
+    void end_drag(bool commit) noexcept;
+    //! Moves item `from` to `to`, keeping the active and hover marks on their tabs.
+    void move_item(std::size_t from, std::size_t to) noexcept;
+    void ensure_tooltip() noexcept;
+    void update_tooltip() noexcept;
+    [[nodiscard]] bool tooltip_wanted(std::size_t index) const noexcept;
     void on_context_menu(LPARAM lp) noexcept;
     bool on_key(WPARAM key) noexcept;
     void check_dpi() noexcept;
 
     void rebuild_text_format() noexcept;
-    [[nodiscard]] bool make_layout(const std::wstring& text, float max_width, float max_height,
-                                   IDWriteTextLayout** out) const noexcept;
+    [[nodiscard]] bool make_layout(IDWriteTextFormat* format, const std::wstring& text, float max_width,
+                                   float max_height, IDWriteTextLayout** out) const noexcept;
     [[nodiscard]] D2D1_TEXT_ANTIALIAS_MODE text_antialias() const noexcept;
     void rebuild_items() noexcept;
+    void build_item(Item& item) noexcept;
+    [[nodiscard]] IDWriteTextFormat* icon_format(const std::wstring& family) noexcept;
     void relayout() noexcept;
     void update_thickness() noexcept;
     bool ensure_buffer(int width, int height) noexcept;
@@ -192,6 +233,9 @@ private:
     int thickness_{0};
 
     com_ptr<IDWriteTextFormat> text_format_;
+    //! Icon fonts at the current size: the system icon font (empty name) and any named ones.
+    std::vector<std::pair<std::wstring, com_ptr<IDWriteTextFormat>>> icon_formats_;
+    unsigned generation_{1};
     std::vector<Item> items_;
     std::vector<int> extents_;
     StripLayout layout_;
@@ -206,6 +250,18 @@ private:
     //! A shortcut consumed WM_SYSKEYDOWN; swallow the WM_SYSCHAR that follows (no beep).
     bool ignore_syschar_{false};
     int wheel_accumulator_{0};
+
+    // Pressing and dragging a tab.
+    std::size_t press_index_{no_index};
+    POINT press_pt_{};
+    bool dragging_{false};
+    std::size_t drag_origin_{no_index};
+    std::size_t drag_index_{no_index};
+
+    // One tooltip, one tool: its rectangle follows the hovered tab.
+    HWND tooltip_{nullptr};
+    std::size_t tip_index_{no_index};
+    std::wstring tip_text_;
 
     // Back buffer and target.
     HDC mem_dc_{nullptr};

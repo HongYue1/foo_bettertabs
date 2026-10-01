@@ -476,3 +476,30 @@ To add once verified in a build (AGENTS.md: verify before writing):
   Media Bar); strong fills now use the cover's light-window colour (`accent_for_card(raw, false)`,
   yellow stays #E5C71B with black text), blended in OKLCh from the line accent at 30% to the fill
   accent at 90% (`StripTheme::fill_accent`).
+
+## 14. Implementation notes (M(c), 0.3.0)
+
+- Configure dialog: `src/hosts/configure_dialog.{h,cpp}`, `foo_bettertabs.rc` (style profile at
+  the top, `dialog_check` 0 problems). Modal, 4 pages (Strip, Look, Tabs, Behaviour), one child
+  dialog per page with its own dark-mode hooks. Works on a `ConfigureState` copy; the container
+  implements `ConfigureTarget::preview` and gets every change live, Cancel previews the original
+  back. From Columns UI's Layout page (no window) nothing is previewed and Move up/down is off
+  (the Layout tree owns the order there). Tab list is a list box, not a ListView: the dark-mode
+  hooks swap a report ListView for a libPPUI list that does not copy items.
+- Strip menu: Rename... (modal, cue banner = panel name, title formatting check + Help), Hide tab
+  (never the last one), Move left/right (up/down on side strips), Show hidden tab submenu,
+  Appearance submenu (kept), Configure....
+- Icons: per tab code point (`TabExtra::icon`), PUA through the system icon font, anything else
+  through the label font with its fallback (emoji). "Show only the icon" setting (id 34); the
+  title becomes the tooltip.
+- Title formatting: compiled once per tab (`compile_safe_ex`), evaluated with
+  `playback_format_title` while playing, without a track otherwise. Re-evaluated on new track,
+  stop, pause, edited and dynamic info (no per-second refresh: `%playback_time%` is not live).
+- One process-wide `PlaybackWatch` (play callback) and `CtrlTabFilter` (message filter, WM_KEYDOWN
+  only), alive while any container has a window. Ctrl+Tab walks up from the focused window; the
+  innermost container with Ctrl+Tab on and two or more tabs takes it (wraps; Shift goes back).
+- Follow playback: per tab "show when playback starts / stops" (TabExtra ids 7, 8); the first
+  visible tab with the flag wins. Not on shutdown stops.
+- Middle click hides ("remove" is reserved and read as hide). Drag reorder moves the tab next to
+  the one it is dropped on; hidden tabs keep their place.
+- Perf log: container creation now reports own time and panel creation time separately.

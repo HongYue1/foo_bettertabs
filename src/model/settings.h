@@ -16,6 +16,7 @@ enum class StripVisibility : std::uint8_t { always, never, two_or_more, auto_hid
 enum class Indicator : std::uint8_t { underline, pill, none };
 enum class AccentSource : std::uint8_t { selection, custom, cover };
 enum class StripBackground : std::uint8_t { theme, custom, accent_tint };
+//! remove_tab is reserved (read as hide_tab): removing a panel by a stray click is too easy.
 enum class MiddleClick : std::uint8_t { nothing, hide_tab, remove_tab };
 enum class RevealMode : std::uint8_t { overlay, push };
 enum class ShowHideAnimation : std::uint8_t { none, slide, fade };
@@ -59,8 +60,14 @@ struct Settings {
     //! Create a child's window on first activation (true) or all at once (false).
     bool lazy_children{true};
     bool remember_active{true};
+    //! Unused since 0.3.0 (follow playback is per tab, TabExtra::show_on_play/stop); kept so
+    //! the stored field round-trips.
     std::uint16_t follow_play_tab{no_tab};
     std::uint16_t follow_stop_tab{no_tab};
+    //! Tabs with an icon show only the icon (the title becomes the tooltip).
+    bool icons_only{false};
+    //! Ctrl+Tab / Ctrl+Shift+Tab cycle the tabs while focus is inside the container.
+    bool ctrl_tab{true};
 
     // Auto-hide.
     std::uint16_t hot_zone{4};

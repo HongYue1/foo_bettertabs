@@ -1,0 +1,166 @@
+// Better Tabs resources. Hand-written, not generated. Coordinates are dialog units.
+
+#include "resource.h"
+#include "winres.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+
+// Dialog style profile (keep every page consistent with this; see
+// foobar2000-component-dev/references/preferences-pages.md):
+//   sections : header + etched line, no group boxes, no bold
+//   fields   : labels in a left column (84 DU, field at 99), colon after
+//   rhythm   : check boxes 14 DU apart, field rows 16 DU, 12 DU before a new section header
+//   hints    : plain text under the control, or beside it for one short fact; units right of
+//              the field
+//   columns  : one column 7..293; content indented 5
+//   colours  : hex edit + swatch button that opens the colour picker
+
+/////////////////////////////////////////////////////////////////////////////
+// Configure: modal, per container. The strip, the area the pages are placed in (IDC_PAGE_HOST,
+// never shown) and the buttons.
+
+IDD_CONFIGURE DIALOGEX 0, 0, 300, 250
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Better Tabs"
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    CONTROL         "",IDC_TABS,"SysTabControl32",WS_CLIPSIBLINGS | WS_TABSTOP,7,7,286,17
+    LTEXT           "",IDC_PAGE_HOST,0,28,300,198,NOT WS_VISIBLE
+    PUSHBUTTON      "Defaults",IDC_DEFAULTS,7,230,50,14
+    DEFPUSHBUTTON   "OK",IDOK,189,230,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,243,230,50,14
+END
+
+// Pages: child dialogs, 300 x 198, created once and shown one at a time. Keep the ids
+// consecutive and in tab order.
+
+IDD_PAGE_STRIP DIALOGEX 0, 0, 300, 198
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Strip",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LTEXT           "Position:",IDC_STATIC,12,23,84,8
+    COMBOBOX        IDC_POSITION,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Show the strip:",IDC_STATIC,12,39,84,8
+    COMBOBOX        IDC_VISIBILITY,99,37,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Rotate the text on side strips",IDC_ROTATE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,53,281,10
+
+    LTEXT           "Tabs",IDC_STATIC,7,75,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,85,286,1
+    LTEXT           "Tab width:",IDC_STATIC,12,94,84,8
+    COMBOBOX        IDC_SIZING,99,92,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Alignment:",IDC_STATIC,12,110,84,8
+    COMBOBOX        IDC_ALIGN,99,108,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Padding across:",IDC_STATIC,12,126,84,8
+    EDITTEXT        IDC_PAD_X,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,126,162,8
+    LTEXT           "Padding along:",IDC_STATIC,12,142,84,8
+    EDITTEXT        IDC_PAD_Y,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,142,162,8
+    LTEXT           "Spacing:",IDC_STATIC,12,158,84,8
+    EDITTEXT        IDC_SPACING,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,158,162,8
+    LTEXT           "Strip thickness:",IDC_STATIC,12,174,84,8
+    EDITTEXT        IDC_THICKNESS,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs, 0 follows the font (0-200)",IDC_STATIC,131,174,162,8
+END
+
+IDD_PAGE_LOOK DIALOGEX 0, 0, 300, 198
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Active tab",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LTEXT           "Indicator:",IDC_STATIC,12,23,84,8
+    COMBOBOX        IDC_INDICATOR,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Show every tab as a chip",IDC_CHIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,37,281,10
+    LTEXT           "Corner radius:",IDC_STATIC,12,53,84,8
+    EDITTEXT        IDC_RADIUS,99,51,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs (0-32)",IDC_STATIC,131,53,162,8
+    LTEXT           "Fill strength:",IDC_STATIC,12,69,84,8
+    CONTROL         "Automatic",IDC_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,68,52,10
+    CONTROL         "",IDC_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,66,108,14
+    LTEXT           "",IDC_STRENGTH_VALUE,265,69,28,8
+
+    LTEXT           "Colours",IDC_STATIC,7,90,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,100,286,1
+    LTEXT           "Accent colour:",IDC_STATIC,12,109,84,8
+    COMBOBOX        IDC_ACCENT_SOURCE,99,107,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom accent:",IDC_STATIC,12,125,84,8
+    EDITTEXT        IDC_ACCENT_HEX,99,123,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_ACCENT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,123,24,12
+    LTEXT           "RRGGBB",IDC_STATIC,171,125,122,8
+    LTEXT           "Strip background:",IDC_STATIC,12,141,84,8
+    COMBOBOX        IDC_BACKGROUND,99,139,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom background:",IDC_STATIC,12,157,84,8
+    EDITTEXT        IDC_BACKGROUND_HEX,99,155,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_BACKGROUND_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,155,24,12
+    LTEXT           "RRGGBB",IDC_STATIC,171,157,122,8
+    LTEXT           "Tint strength:",IDC_STATIC,12,173,84,8
+    CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,170,162,14
+    LTEXT           "",IDC_TINT_VALUE,265,173,28,8
+END
+
+IDD_PAGE_TABS DIALOGEX 0, 0, 300, 198
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Tabs",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LISTBOX         IDC_TAB_LIST,12,21,227,72,LBS_NOTIFY | LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    PUSHBUTTON      "Move up",IDC_MOVE_UP,243,21,50,14
+    PUSHBUTTON      "Move down",IDC_MOVE_DOWN,243,37,50,14
+
+    LTEXT           "Selected tab",IDC_STATIC,7,105,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,115,286,1
+    LTEXT           "Title:",IDC_STATIC,12,124,84,8
+    EDITTEXT        IDC_TAB_TITLE,99,122,140,12,ES_AUTOHSCROLL
+    PUSHBUTTON      "Help",IDC_TAB_TITLE_HELP,243,121,50,14
+    CONTROL         "Use title formatting",IDC_TAB_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,138,140,10
+    LTEXT           "Icon:",IDC_STATIC,12,154,84,8
+    EDITTEXT        IDC_TAB_ICON,99,152,40,12,ES_AUTOHSCROLL
+    LTEXT           "",IDC_TAB_ICON_PREVIEW,143,150,18,15,SS_CENTER | SS_NOPREFIX
+    LTEXT           "Code point (E8D6) or the character",IDC_STATIC,165,154,128,8
+    CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,168,281,10
+    CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,182,136,10
+    CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,182,138,10
+END
+
+IDD_PAGE_BEHAVIOUR DIALOGEX 0, 0, 300, 198
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Mouse and keyboard",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,21,281,10
+    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,35,281,10
+    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,49,281,10
+    LTEXT           "Middle click:",IDC_STATIC,12,65,84,8
+    COMBOBOX        IDC_MIDDLE,99,63,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Panels",IDC_STATIC,7,87,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,97,286,1
+    CONTROL         "Create a panel only when its tab is first shown",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,104,281,10
+    LTEXT           "Faster startup. Switching it off creates every panel up front.",IDC_STATIC,22,116,271,8
+    CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,128,281,10
+    CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,142,281,10
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// Rename: modal, from the strip's right-click menu.
+
+IDD_RENAME DIALOGEX 0, 0, 250, 84
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Rename tab"
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Title:",IDC_STATIC,7,9,36,8
+    EDITTEXT        IDC_RENAME_TITLE,46,7,144,12,ES_AUTOHSCROLL
+    PUSHBUTTON      "Help",IDC_RENAME_HELP,194,6,50,14
+    CONTROL         "Use title formatting",IDC_RENAME_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,46,23,198,10
+    LTEXT           "Leave it empty for the panel's own name.",IDC_STATIC,46,37,198,8
+    DEFPUSHBUTTON   "OK",IDOK,140,63,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,194,63,50,14
+END

@@ -56,6 +56,8 @@ Settings odd_settings() {
     s.strip_background = StripBackground::accent_tint;
     s.background_argb = 0xFF332211u;
     s.tint_strength = 20;
+    s.icons_only = true;
+    s.ctrl_tab = false;
     return s;
 }
 
@@ -71,6 +73,7 @@ InstanceData sample() {
     ea.hidden = true;
     ea.icon = 0xE8D6;
     ea.icon_font = "Segoe MDL2 Assets";
+    ea.show_on_play = true;
     a.extra = encode_tab_extra(ea);
     ChildRecord b;
     b.guid = guid_b;
@@ -98,7 +101,8 @@ int main() {
         check(back.active == 1, "active index");
         const TabExtra ea = decode_tab_extra(back.children[0].extra);
         check(ea.use_custom_title && ea.title == "Now playing \xE2\x99\xAA" && ea.hidden && ea.icon == 0xE8D6 &&
-                  ea.icon_font == "Segoe MDL2 Assets" && !ea.title_is_format,
+                  ea.icon_font == "Segoe MDL2 Assets" && !ea.title_is_format && ea.show_on_play &&
+                      !ea.show_on_stop,
               "tab extra round-trips");
         const TabExtra eb = decode_tab_extra(back.children[1].extra);
         check(eb == TabExtra{}, "empty tab extra reads as defaults");

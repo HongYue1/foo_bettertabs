@@ -204,6 +204,8 @@ enum SettingId : std::uint16_t {
     s_strip_background = 31,
     s_background_argb = 32,
     s_tint_strength = 33,
+    s_icons_only = 34,
+    s_ctrl_tab = 35,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -240,6 +242,8 @@ void write_settings(Writer& w, const Settings& s) {
     field_u8(w, s_strip_background, static_cast<std::uint8_t>(s.strip_background));
     field_u32(w, s_background_argb, s.background_argb);
     field_u8(w, s_tint_strength, s.tint_strength);
+    field_u8(w, s_icons_only, s.icons_only ? 1 : 0);
+    field_u8(w, s_ctrl_tab, s.ctrl_tab ? 1 : 0);
 }
 
 //! Returns false for an id this build does not know.
@@ -280,6 +284,8 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_strip_background: read_enum(v, s.strip_background, StripBackground::accent_tint); return true;
     case s_background_argb: read_u32(v, s.background_argb); return true;
     case s_tint_strength: read_u8(v, s.tint_strength); return true;
+    case s_icons_only: read_bool(v, s.icons_only); return true;
+    case s_ctrl_tab: read_bool(v, s.ctrl_tab); return true;
     default: return false;
     }
 }
@@ -325,6 +331,8 @@ enum ExtraId : std::uint16_t {
     e_icon = 4,
     e_icon_font = 5,
     e_use_custom_title = 6,
+    e_show_on_play = 7,
+    e_show_on_stop = 8,
 };
 
 } // namespace
@@ -438,6 +446,8 @@ Bytes encode_tab_extra(const TabExtra& extra) {
     field_u8(w, e_hidden, extra.hidden ? 1 : 0);
     field_u32(w, e_icon, extra.icon);
     field_string(w, e_icon_font, extra.icon_font);
+    field_u8(w, e_show_on_play, extra.show_on_play ? 1 : 0);
+    field_u8(w, e_show_on_stop, extra.show_on_stop ? 1 : 0);
     write_raw_fields(w, extra.unknown);
     return out;
 }
@@ -457,6 +467,8 @@ TabExtra decode_tab_extra(std::span<const std::uint8_t> bytes) {
         case e_icon_font:
             extra.icon_font.assign(reinterpret_cast<const char*>(v.data()), v.size());
             break;
+        case e_show_on_play: read_bool(v, extra.show_on_play); break;
+        case e_show_on_stop: read_bool(v, extra.show_on_stop); break;
         default: extra.unknown.push_back(RawField{id, Bytes(v.begin(), v.end())}); break;
         }
     });

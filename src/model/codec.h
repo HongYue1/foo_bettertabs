@@ -22,7 +22,8 @@
 //
 //     uint16 version  then fields: uint16 id  uint16 length  bytes
 //       1 title (UTF-8)  2 title is title-format  3 hidden  4 icon code point (uint32)
-//       5 icon font family (UTF-8)  6 use custom title
+//       5 icon font family (UTF-8)  6 use custom title  7 show when playback starts
+//       8 show when playback stops
 
 #include <cstddef>
 #include <cstdint>
@@ -53,6 +54,9 @@ struct TabExtra {
     //! Unicode code point of an icon glyph, 0 = none.
     std::uint32_t icon{0};
     std::string icon_font;
+    //! Follow playback: switch to this tab when playback starts / stops.
+    bool show_on_play{false};
+    bool show_on_stop{false};
     std::vector<RawField> unknown;
 
     [[nodiscard]] bool operator==(const TabExtra&) const = default;

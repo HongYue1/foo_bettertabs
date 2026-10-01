@@ -446,3 +446,23 @@ To add once verified in a build (AGENTS.md: verify before writing):
   their GUID and config but get no tab (Tab stack behaviour).
 - Foreign splitter items: custom title is taken, `m_hidden` is not (it means "collapsed" there).
 - Offline tests: `test/build_tests.bat` (codec + layout).
+- 0.1.1: `is_point_ours` follows Tab stack (only the strip is ours, so CUI's live editing reaches
+  the child panels); the container paints its background on `WM_ERASEBKGND`/`WM_PRINTCLIENT`
+  because transparent children (empty Row/Column) forward erasing to their parent.
+
+## 13. Implementation notes (M(b), 0.2.0)
+
+- Colour: `src/model/colour.h` (OKLab, contrast, `accent_for_background`, minimum 3:1 against the
+  strip). Accent source per instance: CUI selection colour, custom, or the playing cover.
+- Cover: `src/platform/cover_hub` is one process-wide hub (now-playing album art notify + play
+  callback), WIC decode on a CPU worker (`CLSID_WICImagingFactory1` for Win7), FNV hash cache of
+  16, 0.6 s grace before a no-art track drops the cover accent. Containers subscribe only while
+  their accent source is the cover.
+- Fonts: `cui::fonts::get_font` DWrite path (family/weight/style/stretch/size), font fallback and
+  CUI rendering options (antialias, GDI-compatible layouts, rendering params per monitor). Colour
+  glyphs via `D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT` only on 8.1+.
+- Look: underline / pill / text-only indicator, optional chips, hover wash, rotated side text,
+  tab width fit/equal/fill with alignment, "show strip only with two or more tabs".
+- Interim UI: an "Appearance" submenu on the strip's right-click menu sets these per instance
+  until the Configure dialog lands in M(c). Custom accent uses `ChooseColorW` (not dark-themed).
+- Render test (`test/render_test.cpp`) draws the real StripWindow into PNGs at 96/144/192 DPI.

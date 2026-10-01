@@ -78,6 +78,15 @@ bool layered_children_supported() noexcept {
     return value;
 }
 
+bool colour_fonts_supported() noexcept {
+    // An older Direct2D rejects the unknown flag at EndDraw, so ask the DLL: this export is 8.1+.
+    static const bool value = [] {
+        const HMODULE d2d1 = GetModuleHandleW(L"d2d1.dll");
+        return d2d1 != nullptr && GetProcAddress(d2d1, "D2D1ComputeMaximumScaleFactor") != nullptr;
+    }();
+    return value;
+}
+
 bool system_uses_cleartype() noexcept {
     BOOL smoothing = FALSE;
     UINT type = 0;

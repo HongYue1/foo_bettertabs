@@ -12,15 +12,18 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   colour and font clients, perf logging (advconfig Display > "Better Tabs: log performance...").
   Builds x64 and Win32, imports clean, offline tests pass (`test/build_tests.bat`).
 
+- **0.1.1**: Tab stack `is_point_ours` semantics; container paints background for transparent
+  children. Confirmed by the user.
+- **M(b) 0.2.0**: appearance (PLAN.md section 13): accent sources incl. cover hub, CUI DWrite
+  font + rendering options, indicator styles, chips, side strips, tab width modes, Appearance
+  submenu as interim UI, render + accent tests.
+
 ## Waiting for
 
-- The user's M(a) test run (checklist in the M(a) hand-off message) and the console perf block.
+- The user's M(b) test run (checklist in the M(b) hand-off message).
 
 ## Next
 
-- M(b): dark-aware overflow/strip menus (verify native menus follow CUI dark mode first), accent
-  from cover (port foo_mediabar OKLab code + accent_test), `cui::fonts::get_font` DWrite path,
-  per-monitor DPI checks, render test to PNG at 100/150/200%.
 - M(c): Configure dialog, title-format titles, icons, middle click, drag reorder, Ctrl+Tab filter,
   follow playback.
 - M(d): auto-hide + animations.

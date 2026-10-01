@@ -15,7 +15,10 @@
 
 #include <columns_ui-sdk/ui_extension.h>
 
+#include <commdlg.h>
 #include <windowsx.h>
+
+#pragma comment(lib, "comdlg32.lib")
 
 #include <algorithm>
 #include <array>
@@ -25,7 +28,9 @@
 
 #include "../guids.h"
 #include "../model/codec.h"
+#include "../model/colour.h"
 #include "../model/settings.h"
+#include "../platform/cover_hub.h"
 #include "../platform/graphics.h"
 #include "../platform/logging.h"
 #include "../platform/perf.h"
@@ -45,7 +50,33 @@ std::vector<TabsContainer*>& live_containers() {
 }
 
 constexpr unsigned menu_tab_base = 1;
+//! The Appearance submenu (until the Configure dialog in M(c), and kept as quick access after).
+constexpr unsigned menu_style_base = 5000;
 constexpr unsigned menu_panel_base = 10000;
+
+enum StyleCommand : unsigned {
+    style_position_top = menu_style_base,
+    style_position_bottom,
+    style_position_left,
+    style_position_right,
+    style_rotate_side_text,
+    style_indicator_underline,
+    style_indicator_pill,
+    style_indicator_none,
+    style_chip,
+    style_accent_selection,
+    style_accent_cover,
+    style_accent_custom,
+    style_sizing_fit,
+    style_sizing_equal,
+    style_sizing_fill,
+    style_align_start,
+    style_align_centre,
+    style_align_end,
+    style_show_always,
+    style_show_two_or_more,
+    style_last,
+};
 constexpr LONG limit_cap = MAXSHORT;
 
 [[nodiscard]] Bytes to_bytes(const pfc::array_t<t_uint8>& data) {
@@ -136,7 +167,9 @@ struct Tab {
 
 class TabsHost;
 
-class TabsContainer : public uie::container_uie_window_v3_t<uie::splitter_window_v3>, private StripListener {
+class TabsContainer : public uie::container_uie_window_v3_t<uie::splitter_window_v3>,
+                      private StripListener,
+                      private cover::Listener {
 public:
     TabsContainer() { live_containers().push_back(this); }
     ~TabsContainer() { std::erase(live_containers(), this); }
@@ -190,6 +223,8 @@ public:
     void get_children(pfc::list_base_t<uie::window_ptr>& out) const;
     [[nodiscard]] bool self_visible() const;
     void refresh_appearance() noexcept;
+    void refresh_colours() noexcept;
+    void refresh_font() noexcept;
 
 protected:
     uie::splitter_item_t* get_panel(t_size index) const override;
@@ -202,6 +237,13 @@ private:
     void on_strip_overflow(POINT screen) noexcept override;
     bool on_strip_key(UINT message, WPARAM key) noexcept override;
     void on_strip_metrics_changed() noexcept override;
+    // cover::Listener
+    void on_cover_accent_changed() noexcept override;
+    void update_cover_subscription() noexcept;
+    //! After settings_ changed at run time: clamp, push to the strip, lay out again.
+    void apply_settings() noexcept;
+    void append_style_menu(HMENU menu) const noexcept;
+    void run_style_command(unsigned command) noexcept;
 
     void on_create(HWND wnd) noexcept;
     void on_destroy() noexcept;
@@ -232,7 +274,7 @@ private:
     void limits_changed() noexcept;
     static void query_limits(Tab& tab) noexcept;
 
-    void show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items) noexcept;
+    void show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items, bool with_style) noexcept;
 
     Settings settings_{};
     std::vector<RawField> unknown_settings_;
@@ -251,6 +293,7 @@ private:
     uie::size_limit_t limits_{};
     COLORREF background_{RGB(255, 255, 255)};
     bool in_create_{false};
+    bool cover_subscribed_{false};
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -383,6 +426,8 @@ void TabsContainer::set_config(stream_reader* reader, t_size size, abort_callbac
     if (live) {
         for (auto& tab : tabs_) ensure_object(*tab);
         strip_.set_settings(settings_);
+        update_cover_subscription();
+        refresh_colours();
         rebuild_strip();
         ensure_active_valid();
         layout();
@@ -897,6 +942,7 @@ void TabsContainer::on_create(HWND wnd) noexcept {
         host_ = fb2k::service_new<TabsHost>(this);
         if (!strip_.create(wnd, *this)) log::warn("could not create the tab strip");
         strip_.set_settings(settings_);
+        update_cover_subscription();
         refresh_appearance();
         GetClientRect(wnd, &content_);
         for (auto& tab : tabs_) ensure_object(*tab);
@@ -933,6 +979,10 @@ void TabsContainer::on_destroy() noexcept {
     active_ = nullptr;
     strip_.destroy();
     strip_shown_ = false;
+    if (cover_subscribed_) {
+        cover::unsubscribe(this);
+        cover_subscribed_ = false;
+    }
     visible_.clear();
     if (host_.is_valid()) host_->detach();
     host_.release();
@@ -957,32 +1007,113 @@ void TabsContainer::fill_background(HDC dc) const noexcept {
 }
 
 void TabsContainer::refresh_appearance() noexcept {
+    refresh_colours();
+    refresh_font();
+}
+
+void TabsContainer::refresh_colours() noexcept {
     try {
         const cui::colours::helper colours(guids::colour_client);
         StripTheme theme;
         theme.background = colours.get_colour(cui::colours::colour_background);
         theme.text = colours.get_colour(cui::colours::colour_text);
-        theme.accent = colours.get_colour(cui::colours::colour_selection_background);
-        if (settings_.accent_source == AccentSource::custom) {
-            const std::uint32_t argb = settings_.accent_argb;
-            theme.accent = RGB((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
-        }
         theme.dark = colours.is_dark_mode_active();
+
+        // Every accent passes a 3:1 contrast floor against the strip. A cover colour is raw, so
+        // it also gets the full legibility treatment (lightness window, chroma floor; same as
+        // Media Bar). Columns UI's selection colour and a custom colour are the user's choice
+        // and are only nudged when they would vanish.
+        const std::uint32_t bg = colour::rgb_from_colorref(theme.background);
+        std::uint32_t accent = colour::rgb_from_colorref(colours.get_colour(cui::colours::colour_selection_background));
+        if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
+        if (settings_.accent_source == AccentSource::cover) {
+            if (const auto raw = cover::current(); raw) {
+                accent = colour::accent_for_background(*raw, bg);
+            }
+        }
+        theme.accent = colour::colorref_from_rgb(colour::with_min_contrast(accent, bg, colour::accent_min_contrast));
+
         background_ = theme.background;
         strip_.set_theme(theme);
+        if (const HWND self = get_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
+    } catch (...) {
+    }
+}
 
+void TabsContainer::refresh_font() noexcept {
+    try {
         StripFont font;
         font.font = cui::fonts::get_log_font_with_fallback(guids::font_client);
         font.font_dpi = gfx::system_dpi();
+        StripTextOptions options;
+        cui::fonts::rendering_options::ptr rendering;
+        try {
+            // Columns UI 3+: the DirectWrite font, its emoji fallback and the text rendering
+            // options. Earlier versions have no manager_v3 and leave `font.family` empty.
+            if (const cui::fonts::font::ptr dw = cui::fonts::get_font(guids::font_client); dw.is_valid()) {
+                if (const wchar_t* family = dw->family_name(); family != nullptr) font.family = family;
+                font.weight = dw->weight();
+                font.style = dw->style();
+                font.stretch = dw->stretch();
+                font.size_dip = dw->size();
+                IDWriteFontFallback* fallback = nullptr;
+                if (SUCCEEDED(dw->create_font_fallback(&fallback)) && fallback != nullptr) {
+                    *font.fallback.put() = fallback;
+                }
+                rendering = dw->rendering_options();
+            }
+        } catch (...) {
+            font.family.clear();
+        }
+        if (rendering.is_valid()) {
+            options.antialias = rendering->rendering_mode() == DWRITE_RENDERING_MODE_ALIASED ? TextAntialias::aliased
+                                : rendering->use_greyscale_antialiasing()                    ? TextAntialias::greyscale
+                                                                                             : TextAntialias::automatic;
+            options.gdi_compatible = rendering->use_gdi_compatible_layout();
+            options.gdi_natural = rendering->use_gdi_natural();
+            options.colour_glyphs = rendering->use_colour_glyphs();
+            const HWND self = get_wnd();
+            if (IDWriteFactory* factory = gfx::dwrite(); factory != nullptr && self != nullptr) {
+                IDWriteRenderingParams* params = nullptr;
+                if (SUCCEEDED(rendering->create_rendering_params(
+                        factory, MonitorFromWindow(self, MONITOR_DEFAULTTONEAREST), &params)) &&
+                    params != nullptr) {
+                    *options.params.put() = params;
+                }
+            }
+        }
+
         const int before = strip_.thickness();
+        strip_.set_text_options(options);
         strip_.set_font(font);
         if (strip_.thickness() != before && get_wnd() != nullptr) {
             layout();
             limits_changed();
         }
-        if (const HWND self = get_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
     } catch (...) {
     }
+}
+
+void TabsContainer::on_cover_accent_changed() noexcept { refresh_colours(); }
+
+void TabsContainer::update_cover_subscription() noexcept {
+    const bool want = get_wnd() != nullptr && settings_.accent_source == AccentSource::cover;
+    if (want == cover_subscribed_) return;
+    cover_subscribed_ = want;
+    if (want) {
+        cover::subscribe(this);
+    } else {
+        cover::unsubscribe(this);
+    }
+}
+
+void TabsContainer::apply_settings() noexcept {
+    clamp(settings_);
+    strip_.set_settings(settings_);
+    update_cover_subscription();
+    refresh_colours();
+    layout();
+    limits_changed();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1231,7 +1362,8 @@ void TabsContainer::on_strip_step(int direction) noexcept {
     activate(tabs_[visible_[next]].get(), true);
 }
 
-void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items) noexcept {
+void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items,
+                                  bool with_style) noexcept {
     const HWND self = get_wnd();
     if (self == nullptr) return;
     const service_ptr_t<TabsContainer> keep_alive(this);
@@ -1254,13 +1386,19 @@ void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool wi
                 hook->win32_build_menu(menu, menu_panel_base, 0x7FFF0000u - menu_panel_base);
             }
         }
+        if (with_style) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            append_style_menu(menu);
+        }
         const UINT cmd = static_cast<UINT>(TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD,
                                                           screen.x, screen.y, 0, self, nullptr));
         DestroyMenu(menu);
         menu = nullptr;
         if (cmd >= menu_panel_base) {
             hook->execute_by_id(cmd);
-        } else if (cmd >= menu_tab_base) {
+        } else if (cmd >= menu_style_base && cmd < style_last) {
+            run_style_command(cmd);
+        } else if (cmd >= menu_tab_base && cmd < menu_style_base) {
             const std::size_t s = cmd - menu_tab_base;
             // The tab list may have changed while the menu was open.
             if (s < snapshot.size() && snapshot == visible_) activate(tabs_[snapshot[s]].get(), true);
@@ -1272,10 +1410,113 @@ void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool wi
 }
 
 void TabsContainer::on_strip_menu(std::size_t index, POINT screen) noexcept {
-    show_tab_menu(index != no_index ? index : strip_index_of(active_), screen, index != no_index);
+    show_tab_menu(index != no_index ? index : strip_index_of(active_), screen, index != no_index, true);
 }
 
-void TabsContainer::on_strip_overflow(POINT screen) noexcept { show_tab_menu(no_index, screen, false); }
+void TabsContainer::on_strip_overflow(POINT screen) noexcept { show_tab_menu(no_index, screen, false, false); }
+
+void TabsContainer::append_style_menu(HMENU menu) const noexcept {
+    HMENU style = CreatePopupMenu();
+    if (style == nullptr) return;
+    const auto radio = [](HMENU m, unsigned id, const wchar_t* text, bool on) {
+        AppendMenuW(m, MF_STRING | (on ? MF_CHECKED : 0), id, text);
+        if (on) {
+            MENUITEMINFOW mii{sizeof(mii)};
+            mii.fMask = MIIM_FTYPE;
+            mii.fType = MFT_STRING | MFT_RADIOCHECK;
+            SetMenuItemInfoW(m, id, FALSE, &mii);
+        }
+    };
+    const auto sub = [&](const wchar_t* text) {
+        HMENU m = CreatePopupMenu();
+        if (m != nullptr) AppendMenuW(style, MF_POPUP, reinterpret_cast<UINT_PTR>(m), text);
+        return m;
+    };
+    const Settings& s = settings_;
+    if (HMENU m = sub(L"Strip position"); m != nullptr) {
+        radio(m, style_position_top, L"Top", s.position == StripPosition::top);
+        radio(m, style_position_bottom, L"Bottom", s.position == StripPosition::bottom);
+        radio(m, style_position_left, L"Left", s.position == StripPosition::left);
+        radio(m, style_position_right, L"Right", s.position == StripPosition::right);
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        const bool side = s.position == StripPosition::left || s.position == StripPosition::right;
+        AppendMenuW(m, MF_STRING | (s.side_text == SideText::rotated ? MF_CHECKED : 0) | (side ? 0 : MF_GRAYED),
+                    style_rotate_side_text, L"Rotate text on side strips");
+    }
+    if (HMENU m = sub(L"Active tab"); m != nullptr) {
+        radio(m, style_indicator_underline, L"Underline", s.indicator == Indicator::underline);
+        radio(m, style_indicator_pill, L"Pill", s.indicator == Indicator::pill);
+        radio(m, style_indicator_none, L"Text only", s.indicator == Indicator::none);
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(m, MF_STRING | (s.chip ? MF_CHECKED : 0), style_chip, L"Chips");
+    }
+    if (HMENU m = sub(L"Accent colour"); m != nullptr) {
+        radio(m, style_accent_selection, L"Columns UI selection colour", s.accent_source == AccentSource::selection);
+        radio(m, style_accent_cover, L"From the playing cover", s.accent_source == AccentSource::cover);
+        radio(m, style_accent_custom, L"Custom...", s.accent_source == AccentSource::custom);
+    }
+    if (HMENU m = sub(L"Tab width"); m != nullptr) {
+        radio(m, style_sizing_fit, L"Fit the title", s.sizing == TabSizing::fit);
+        radio(m, style_sizing_equal, L"All equal", s.sizing == TabSizing::equal);
+        radio(m, style_sizing_fill, L"Fill the strip", s.sizing == TabSizing::fill);
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        const bool slack = s.sizing != TabSizing::fill;
+        const UINT grey = slack ? 0 : MF_GRAYED;
+        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::start ? MF_CHECKED : 0), style_align_start,
+                    L"Align to start");
+        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::centre ? MF_CHECKED : 0), style_align_centre,
+                    L"Centre");
+        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::end ? MF_CHECKED : 0), style_align_end,
+                    L"Align to end");
+    }
+    if (HMENU m = sub(L"Show strip"); m != nullptr) {
+        radio(m, style_show_always, L"Always", s.visibility == StripVisibility::always);
+        radio(m, style_show_two_or_more, L"Only with two or more tabs",
+              s.visibility == StripVisibility::two_or_more);
+    }
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(style), L"Appearance");
+}
+
+void TabsContainer::run_style_command(unsigned command) noexcept {
+    Settings& s = settings_;
+    switch (command) {
+    case style_position_top: s.position = StripPosition::top; break;
+    case style_position_bottom: s.position = StripPosition::bottom; break;
+    case style_position_left: s.position = StripPosition::left; break;
+    case style_position_right: s.position = StripPosition::right; break;
+    case style_rotate_side_text:
+        s.side_text = s.side_text == SideText::rotated ? SideText::horizontal : SideText::rotated;
+        break;
+    case style_indicator_underline: s.indicator = Indicator::underline; break;
+    case style_indicator_pill: s.indicator = Indicator::pill; break;
+    case style_indicator_none: s.indicator = Indicator::none; break;
+    case style_chip: s.chip = !s.chip; break;
+    case style_accent_selection: s.accent_source = AccentSource::selection; break;
+    case style_accent_cover: s.accent_source = AccentSource::cover; break;
+    case style_accent_custom: {
+        static COLORREF custom_colours[16]{};
+        CHOOSECOLORW cc{sizeof(cc)};
+        cc.hwndOwner = core_api::get_main_window();
+        cc.rgbResult = colour::colorref_from_rgb(s.accent_argb & 0xFFFFFFu);
+        cc.lpCustColors = custom_colours;
+        cc.Flags = CC_RGBINIT | CC_FULLOPEN;
+        if (!ChooseColorW(&cc)) return;
+        s.accent_argb = 0xFF000000u | colour::rgb_from_colorref(cc.rgbResult);
+        s.accent_source = AccentSource::custom;
+        break;
+    }
+    case style_sizing_fit: s.sizing = TabSizing::fit; break;
+    case style_sizing_equal: s.sizing = TabSizing::equal; break;
+    case style_sizing_fill: s.sizing = TabSizing::fill; break;
+    case style_align_start: s.align = TabAlign::start; break;
+    case style_align_centre: s.align = TabAlign::centre; break;
+    case style_align_end: s.align = TabAlign::end; break;
+    case style_show_always: s.visibility = StripVisibility::always; break;
+    case style_show_two_or_more: s.visibility = StripVisibility::two_or_more; break;
+    default: return;
+    }
+    apply_settings();
+}
 
 bool TabsContainer::on_strip_key(UINT message, WPARAM key) noexcept {
     try {
@@ -1292,6 +1533,8 @@ bool TabsContainer::on_strip_key(UINT message, WPARAM key) noexcept {
 }
 
 void TabsContainer::on_strip_metrics_changed() noexcept {
+    // A DPI change usually means another monitor: its text rendering parameters differ.
+    refresh_font();
     layout();
     limits_changed();
 }
@@ -1301,8 +1544,12 @@ uie::window_factory<TabsContainer> g_container_factory;
 // ---------------------------------------------------------------------------------------------
 // Colours and fonts pages. Singletons: fan changes out to the live containers.
 
-void refresh_all() noexcept {
-    for (TabsContainer* container : live_containers()) container->refresh_appearance();
+void refresh_all_colours() noexcept {
+    for (TabsContainer* container : live_containers()) container->refresh_colours();
+}
+
+void refresh_all_fonts() noexcept {
+    for (TabsContainer* container : live_containers()) container->refresh_font();
 }
 
 class ColourClient : public cui::colours::client {
@@ -1315,9 +1562,9 @@ public:
     }
     uint32_t get_supported_bools() const override { return cui::colours::bool_flag_dark_mode_enabled; }
     bool get_themes_supported() const override { return false; }
-    void on_colour_changed(uint32_t) const override { refresh_all(); }
+    void on_colour_changed(uint32_t) const override { refresh_all_colours(); }
     void on_bool_changed(uint32_t mask) const override {
-        if ((mask & cui::colours::bool_flag_dark_mode_enabled) != 0) refresh_all();
+        if ((mask & cui::colours::bool_flag_dark_mode_enabled) != 0) refresh_all_colours();
     }
 };
 
@@ -1328,7 +1575,7 @@ public:
     const GUID& get_client_guid() const override { return guids::font_client; }
     void get_name(pfc::string_base& out) const override { out = BETTERTABS_NAME ": tabs"; }
     cui::fonts::font_type_t get_default_font_type() const override { return cui::fonts::font_type_labels; }
-    void on_font_changed() const override { refresh_all(); }
+    void on_font_changed() const override { refresh_all_fonts(); }
 };
 
 cui::fonts::client::factory<FontClient> g_font_client;

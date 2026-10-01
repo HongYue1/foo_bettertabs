@@ -28,17 +28,39 @@
 namespace bettertabs {
 
 struct StripTheme {
+    //! The panel background; the strip is drawn on it (lifted slightly in dark mode).
     COLORREF background{RGB(255, 255, 255)};
     COLORREF text{RGB(0, 0, 0)};
+    //! Already made legible against the background by the host.
     COLORREF accent{RGB(0, 120, 215)};
     bool dark{false};
     [[nodiscard]] bool operator==(const StripTheme&) const = default;
 };
 
 struct StripFont {
+    //! GDI description: used when `family` is empty (Columns UI before 3.0).
     LOGFONTW font{};
     //! The DPI lfHeight is expressed in.
     unsigned font_dpi{96};
+    //! DirectWrite description from Columns UI 3+; wins over `font` when set.
+    std::wstring family;
+    DWRITE_FONT_WEIGHT weight{DWRITE_FONT_WEIGHT_NORMAL};
+    DWRITE_FONT_STYLE style{DWRITE_FONT_STYLE_NORMAL};
+    DWRITE_FONT_STRETCH stretch{DWRITE_FONT_STRETCH_NORMAL};
+    float size_dip{0.0f};
+    //! An IDWriteFontFallback (Windows 8.1+), applied when the text format can take it.
+    com_ptr<IUnknown> fallback;
+};
+
+enum class TextAntialias : std::uint8_t { automatic, greyscale, aliased };
+
+//! Columns UI's text rendering options (Colours and fonts > Text rendering).
+struct StripTextOptions {
+    TextAntialias antialias{TextAntialias::automatic};
+    bool gdi_compatible{false};
+    bool gdi_natural{false};
+    bool colour_glyphs{true};
+    com_ptr<IDWriteRenderingParams> params;
 };
 
 class StripListener {
@@ -74,6 +96,7 @@ public:
     void set_settings(const Settings& settings) noexcept;
     void set_theme(const StripTheme& theme) noexcept;
     void set_font(const StripFont& font) noexcept;
+    void set_text_options(const StripTextOptions& options) noexcept;
     //! Replaces all tabs. Rebuilds their text layouts, so only call it when a label changed.
     void set_labels(std::span<const std::wstring> labels, std::size_t active) noexcept;
     //! Cheap: invalidates the old and new active tab only (unless the visible range moves).
@@ -81,6 +104,12 @@ public:
 
     //! Thickness across the strip in pixels at the current DPI.
     [[nodiscard]] int thickness() const noexcept { return thickness_; }
+
+    //! Where tab `index` is drawn (empty if it is not), in strip client pixels.
+    [[nodiscard]] RECT tab_bounds(std::size_t index) const noexcept { return tab_rect(index); }
+
+    //! Offline render test only: render at this DPI instead of the window's (0 = the window's).
+    void set_dpi_override(unsigned dpi) noexcept;
 
     //! Paint statistics since the last call.
     void take_paint_stats(perf::PaintStats& out) noexcept;
@@ -113,6 +142,9 @@ private:
     void check_dpi() noexcept;
 
     void rebuild_text_format() noexcept;
+    [[nodiscard]] bool make_layout(const std::wstring& text, float max_width, float max_height,
+                                   IDWriteTextLayout** out) const noexcept;
+    [[nodiscard]] D2D1_TEXT_ANTIALIAS_MODE text_antialias() const noexcept;
     void rebuild_items() noexcept;
     void relayout() noexcept;
     void update_thickness() noexcept;
@@ -139,7 +171,12 @@ private:
     Settings settings_{};
     StripTheme theme_{};
     StripFont font_{};
+    StripTextOptions text_options_{};
+    //! The strip's own background, derived from the theme.
+    COLORREF surface_{RGB(255, 255, 255)};
+    D2D1_DRAW_TEXT_OPTIONS draw_text_options_{D2D1_DRAW_TEXT_OPTIONS_CLIP};
     unsigned dpi_{96};
+    unsigned dpi_override_{0};
     int width_{0};
     int height_{0};
     int thickness_{0};

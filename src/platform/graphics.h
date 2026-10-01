@@ -23,6 +23,9 @@ void shutdown() noexcept;
 //! Windows 8 or later: child windows may be WS_EX_LAYERED.
 [[nodiscard]] bool layered_children_supported() noexcept;
 
+//! Direct2D 1.2+ (Windows 8.1): D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT is understood.
+[[nodiscard]] bool colour_fonts_supported() noexcept;
+
 //! ClearType is on in Windows.
 [[nodiscard]] bool system_uses_cleartype() noexcept;
 

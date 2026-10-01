@@ -3,6 +3,8 @@
 
 #include "strip_window.h"
 
+#include <dwrite_2.h>
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -45,6 +47,17 @@ constexpr float wide_layout = 100000.0f;
 
 enum class Edge : std::uint8_t { top, bottom, left, right };
 
+// The look (PLAN.md 6.1). Overlay strengths are alpha of the text colour over the strip.
+constexpr float hover_alpha_dark = 0.08f;
+constexpr float hover_alpha_light = 0.06f;
+constexpr float chip_alpha = 0.05f;
+constexpr float chip_active_alpha = 0.18f;
+constexpr float pill_alpha_dark = 0.30f;
+constexpr float pill_alpha_light = 0.20f;
+constexpr float inactive_text = 0.70f;
+//! Dark mode only: the strip is lifted off the panel so it reads as chrome, not content.
+constexpr float dark_lift = 0.04f;
+
 } // namespace
 
 StripWindow::~StripWindow() {
@@ -73,7 +86,7 @@ bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
         listener_ = nullptr;
         return false;
     }
-    dpi_ = gfx::window_dpi(wnd);
+    dpi_ = dpi_override_ != 0 ? dpi_override_ : gfx::window_dpi(wnd);
     const LRESULT ui_state = SendMessageW(wnd, WM_QUERYUISTATE, 0, 0);
     hide_focus_ = (ui_state & UISF_HIDEFOCUS) != 0;
     rebuild_text_format();
@@ -103,7 +116,52 @@ void StripWindow::set_settings(const Settings& settings) noexcept {
 void StripWindow::set_theme(const StripTheme& theme) noexcept {
     if (theme == theme_) return;
     theme_ = theme;
+    surface_ = theme.dark ? blend(theme.text, theme.background, dark_lift) : theme.background;
     if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::set_text_options(const StripTextOptions& options) noexcept {
+    const bool relayout_needed =
+        options.gdi_compatible != text_options_.gdi_compatible || options.gdi_natural != text_options_.gdi_natural;
+    text_options_ = options;
+    draw_text_options_ = D2D1_DRAW_TEXT_OPTIONS_CLIP;
+    if (options.colour_glyphs && gfx::colour_fonts_supported()) {
+        draw_text_options_ = static_cast<D2D1_DRAW_TEXT_OPTIONS>(draw_text_options_ |
+                                                                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    }
+    if (target_) target_->SetTextRenderingParams(text_options_.params.get());
+    if (relayout_needed) {
+        // GDI-compatible layouts measure differently: the widths change.
+        rebuild_text_format();
+        rebuild_items();
+        update_thickness();
+        relayout();
+    }
+    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+D2D1_TEXT_ANTIALIAS_MODE StripWindow::text_antialias() const noexcept {
+    switch (text_options_.antialias) {
+    case TextAntialias::greyscale: return D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
+    case TextAntialias::aliased: return D2D1_TEXT_ANTIALIAS_MODE_ALIASED;
+    case TextAntialias::automatic:
+    default: return cleartype_ ? D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
+    }
+}
+
+bool StripWindow::make_layout(const std::wstring& text, float max_width, float max_height,
+                              IDWriteTextLayout** out) const noexcept {
+    IDWriteFactory* factory = gfx::dwrite();
+    if (factory == nullptr || !text_format_) return false;
+    const auto length = static_cast<UINT32>(text.size());
+    // The target works in device pixels at 96 "DPI", so one DIP of the layout is one pixel.
+    const HRESULT hr = text_options_.gdi_compatible
+                           ? factory->CreateGdiCompatibleTextLayout(text.c_str(), length, text_format_.get(), max_width,
+                                                                    max_height, 1.0f, nullptr,
+                                                                    text_options_.gdi_natural ? TRUE : FALSE, out)
+                           : factory->CreateTextLayout(text.c_str(), length, text_format_.get(), max_width,
+                                                       max_height, out);
+    return SUCCEEDED(hr);
 }
 
 void StripWindow::set_font(const StripFont& font) noexcept {
@@ -159,6 +217,21 @@ void StripWindow::rebuild_text_format() noexcept {
     IDWriteFactory* factory = gfx::dwrite();
     if (factory == nullptr) return;
 
+    // Columns UI 3+: its own DirectWrite description (variable-font axes aside), plus its font
+    // fallback for emoji. Sizes are DIPs; the target counts pixels.
+    if (!font_.family.empty() && font_.size_dip > 0.0f) {
+        try {
+            com_ptr<IDWriteTextFormat> format;
+            const float em = font_.size_dip * static_cast<float>(dpi_) / 96.0f;
+            if (SUCCEEDED(factory->CreateTextFormat(font_.family.c_str(), nullptr, font_.weight, font_.style,
+                                                    font_.stretch, em, L"", format.put()))) {
+                text_format_ = std::move(format);
+            }
+        } catch (...) {
+            text_format_.reset();
+        }
+    }
+
     LOGFONTW lf = font_.font;
     unsigned font_dpi = font_.font_dpi != 0 ? font_.font_dpi : 96;
     if (lf.lfFaceName[0] == L'\0') {
@@ -170,7 +243,7 @@ void StripWindow::rebuild_text_format() noexcept {
         }
     }
 
-    try {
+    if (!text_format_) try {
         com_ptr<IDWriteGdiInterop> interop;
         if (FAILED(factory->GetGdiInterop(interop.put()))) return;
         com_ptr<IDWriteFont> font;
@@ -220,22 +293,39 @@ void StripWindow::rebuild_text_format() noexcept {
                                              font->GetStretch(), em, L"", format.put()))) {
             return;
         }
+        text_format_ = std::move(format);
+    } catch (...) {
+        text_format_.reset();
+    }
+    if (!text_format_) return;
+
+    try {
+        IDWriteTextFormat* format = text_format_.get();
         format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
         com_ptr<IDWriteInlineObject> ellipsis;
-        if (SUCCEEDED(factory->CreateEllipsisTrimmingSign(format.get(), ellipsis.put()))) {
+        if (SUCCEEDED(factory->CreateEllipsisTrimmingSign(format, ellipsis.put()))) {
             format->SetTrimming(&trimming, ellipsis.get());
+        }
+        if (font_.fallback) {
+            // IDWriteTextFormat1 is Windows 8.1+; earlier, the system fallback applies.
+            com_ptr<IDWriteTextFormat1> format1;
+            com_ptr<IDWriteFontFallback> fallback;
+            if (SUCCEEDED(format->QueryInterface(__uuidof(IDWriteTextFormat1), reinterpret_cast<void**>(format1.put()))) &&
+                SUCCEEDED(font_.fallback->QueryInterface(__uuidof(IDWriteFontFallback),
+                                                         reinterpret_cast<void**>(fallback.put())))) {
+                format1->SetFontFallback(fallback.get());
+            }
         }
 
         com_ptr<IDWriteTextLayout> probe;
-        if (SUCCEEDED(factory->CreateTextLayout(L"Ag", 2, format.get(), wide_layout, wide_layout, probe.put()))) {
+        if (make_layout(L"Ag", wide_layout, wide_layout, probe.put())) {
             DWRITE_TEXT_METRICS tm{};
             if (SUCCEEDED(probe->GetMetrics(&tm))) line_height_ = ceil_px(tm.height);
         }
-        if (line_height_ <= 0) line_height_ = ceil_px(em * 1.33f);
-        text_format_ = std::move(format);
+        if (line_height_ <= 0) line_height_ = ceil_px(format->GetFontSize() * 1.33f);
     } catch (...) {
         text_format_.reset();
     }
@@ -249,11 +339,7 @@ void StripWindow::rebuild_items() noexcept {
         item.text_height = line_height_;
         item.draw_width = 0;
         if (factory == nullptr || !text_format_) continue;
-        if (FAILED(factory->CreateTextLayout(item.label.c_str(), static_cast<UINT32>(item.label.size()),
-                                             text_format_.get(), wide_layout, static_cast<float>(line_height_),
-                                             item.layout.put()))) {
-            continue;
-        }
+        if (!make_layout(item.label, wide_layout, static_cast<float>(line_height_), item.layout.put())) continue;
         DWRITE_TEXT_METRICS tm{};
         if (SUCCEEDED(item.layout->GetMetrics(&tm))) {
             item.text_width = ceil_px(tm.widthIncludingTrailingWhitespace);
@@ -412,6 +498,7 @@ bool StripWindow::ensure_target() noexcept {
         target_.reset();
         return false;
     }
+    if (text_options_.params) target_->SetTextRenderingParams(text_options_.params.get());
     return true;
 }
 
@@ -426,9 +513,8 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
     origin_y_ = static_cast<float>(dirty.top);
     target_->BeginDraw();
     target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
-    target_->SetTextAntialiasMode(cleartype_ ? D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE
-                                             : D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-    target_->Clear(colour(theme_.background));
+    target_->SetTextAntialiasMode(text_antialias());
+    target_->Clear(colour(surface_));
 
     for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
         const RECT r = tab_rect(i);
@@ -496,14 +582,23 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         bg.bottom -= inset_along;
     }
 
+    // One fill at most, strongest first; every one is a blend over the opaque strip, so text
+    // drawn on top keeps ClearType.
+    float fill_alpha = 0.0f;
+    COLORREF fill = theme_.text;
     if (active && settings_.indicator == Indicator::pill) {
-        brush_->SetColor(colour(theme_.accent, theme_.dark ? 0.30f : 0.20f));
-        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+        fill = theme_.accent;
+        fill_alpha = theme_.dark ? pill_alpha_dark : pill_alpha_light;
+    } else if (active && settings_.chip) {
+        fill = theme_.accent;
+        fill_alpha = chip_active_alpha;
     } else if (hover) {
-        brush_->SetColor(colour(theme_.text, theme_.dark ? 0.10f : 0.07f));
-        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+        fill_alpha = (theme_.dark ? hover_alpha_dark : hover_alpha_light) + (settings_.chip ? chip_alpha : 0.0f);
     } else if (settings_.chip) {
-        brush_->SetColor(colour(theme_.text, 0.05f));
+        fill_alpha = chip_alpha;
+    }
+    if (fill_alpha > 0.0f) {
+        brush_->SetColor(colour(fill, fill_alpha));
         target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
     }
 
@@ -529,11 +624,10 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - item.draw_width) / 2.0f));
         }
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
-        const COLORREF text = active || hover ? theme_.text : blend(theme_.text, theme_.background, 0.72f);
+        const COLORREF text = active || hover ? theme_.text : blend(theme_.text, surface_, inactive_text);
         brush_->SetColor(colour(text));
         target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
-        target_->DrawTextLayout(D2D1::Point2F(x, y), item.layout.get(), brush_.get(),
-                                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        target_->DrawTextLayout(D2D1::Point2F(x, y), item.layout.get(), brush_.get(), draw_text_options_);
         target_->PopAxisAlignedClip();
     }
 
@@ -558,12 +652,12 @@ void StripWindow::draw_chevron() noexcept {
         const float h = static_cast<float>(px(11));
         const D2D1_RECT_F bg{cx - h, cy - h, cx + h, cy + h};
         const float radius = static_cast<float>(px(settings_.corner_radius));
-        brush_->SetColor(colour(theme_.text, theme_.dark ? 0.10f : 0.07f));
+        brush_->SetColor(colour(theme_.text, theme_.dark ? hover_alpha_dark : hover_alpha_light));
         target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
     }
     const float w = static_cast<float>(px(4));
     const float stroke = (std::max)(1.0f, static_cast<float>(dpi_) / 96.0f * 1.5f);
-    brush_->SetColor(colour(blend(theme_.text, theme_.background, 0.8f)));
+    brush_->SetColor(colour(blend(theme_.text, surface_, 0.8f)));
     target_->DrawLine(D2D1::Point2F(cx - w, cy - w / 2.0f), D2D1::Point2F(cx, cy + w / 2.0f), brush_.get(), stroke);
     target_->DrawLine(D2D1::Point2F(cx, cy + w / 2.0f), D2D1::Point2F(cx + w, cy - w / 2.0f), brush_.get(), stroke);
 }
@@ -672,9 +766,9 @@ void StripWindow::on_paint() noexcept {
             BitBlt(dc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, mem_dc_, rc.left, rc.top, SRCCOPY);
         } else {
             // Lost target or no Direct2D: flat background now, a full retry next time.
-            const HBRUSH brush = CreateSolidBrush(theme_.background);
-            FillRect(dc, &rc, brush);
-            DeleteObject(brush);
+            const COLORREF previous = SetDCBrushColor(dc, surface_);
+            FillRect(dc, &rc, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+            SetDCBrushColor(dc, previous);
             if (!target_) InvalidateRect(wnd_, nullptr, FALSE);
         }
         if (measure) {
@@ -687,7 +781,7 @@ void StripWindow::on_paint() noexcept {
 
 void StripWindow::check_dpi() noexcept {
     if (wnd_ == nullptr) return;
-    const unsigned dpi = gfx::window_dpi(wnd_);
+    const unsigned dpi = dpi_override_ != 0 ? dpi_override_ : gfx::window_dpi(wnd_);
     if (dpi == dpi_) return;
     dpi_ = dpi;
     rebuild_text_format();
@@ -696,6 +790,11 @@ void StripWindow::check_dpi() noexcept {
     relayout();
     InvalidateRect(wnd_, nullptr, FALSE);
     if (listener_ != nullptr) listener_->on_strip_metrics_changed();
+}
+
+void StripWindow::set_dpi_override(unsigned dpi) noexcept {
+    dpi_override_ = dpi;
+    check_dpi();
 }
 
 void StripWindow::on_size(int width, int height) noexcept {

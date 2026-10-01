@@ -110,7 +110,10 @@
     <ClCompile Include="src\component.cpp" />
     <ClCompile Include="src\hosts\container.cpp" />
     <ClCompile Include="src\model\codec.cpp" />
+    <ClCompile Include="src\model\cover_accent.cpp" />
     <ClCompile Include="src\platform\alloc_counter.cpp" />
+    <ClCompile Include="src\platform\cover_hub.cpp" />
+    <ClCompile Include="src\platform\image_decoder.cpp" />
     <ClCompile Include="src\platform\graphics.cpp" />
     <ClCompile Include="src\platform\logging.cpp" />
     <ClCompile Include="src\platform\perf.cpp" />

@@ -5,6 +5,7 @@
 
 #include <helpers/foobar2000+atl.h>
 
+#include "platform/cover_hub.h"
 #include "platform/graphics.h"
 #include "version.h"
 
@@ -22,7 +23,10 @@ namespace {
 // Nothing at startup: containers set themselves up when Columns UI creates them.
 class lifecycle : public initquit {
 public:
-    void on_quit() override { gfx::shutdown(); }
+    void on_quit() override {
+        cover::shutdown();
+        gfx::shutdown();
+    }
 };
 
 FB2K_SERVICE_FACTORY(lifecycle);

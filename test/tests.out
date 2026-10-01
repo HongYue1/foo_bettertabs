@@ -44,4 +44,21 @@ ok    zero length: nothing placed
 ok    no tabs
 ok    output storage reused
 PASS (0 failures)
-EXIT=0 0 
+== accent == 
+accent gradient checker     raw #A35DA9 -> dark #C179C7 (5.4:1), light #A15BA7 (4.6:1)  1.772 ms
+accent khaki + 12% blue     raw #2A7BF0 -> dark #5197FF (5.7:1), light #2375E9 (4.4:1)  1.690 ms
+accent greyscale            raw #7E7E7E -> dark #D4D4D4 (11.1:1), light #3D3D3D (10.9:1)  1.270 ms
+accent navy + 4% orange     raw #F28A1E -> dark #F28A1E (6.6:1), light #B46200 (4.5:1)  1.843 ms
+accent black + red stripe   raw #C81E24 -> dark #FC5751 (5.2:1), light #C81E24 (5.7:1)  1.414 ms
+accent pastel pink + white  raw #F4C6D2 -> dark #FFABC3 (9.3:1), light #B25976 (4.6:1)  1.325 ms
+accent yellow + black type  raw #F2D21B -> dark #E6C700 (9.8:1), light #8E7A00 (4.3:1)  1.654 ms
+accent teal / orange        raw #E0772F -> dark #E17830 (5.4:1), light #BE5A00 (4.5:1)  1.773 ms
+accent forest + skin        raw #38582A -> dark #74A95D (5.9:1), light #2F6113 (7.4:1)  1.698 ms
+transparent cover -> no accent (ok)
+failures: 0
+== render == 
+dpi 96 (100%): 11 strips, worst full render 1.410 ms -> out\render_100.png
+dpi 144 (150%): 11 strips, worst full render 1.433 ms -> out\render_150.png
+dpi 192 (200%): 11 strips, worst full render 1.800 ms -> out\render_200.png
+failures: 0
+EXIT=0 0 0 0 

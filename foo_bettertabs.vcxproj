@@ -40,7 +40,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup Label="UserMacros">
-    <!-- The workspace SDK, not a vendored copy. See ../AGENTS.md. -->
+    <!-- The sibling SDK folder, not a vendored copy (see README, Building). -->
     <SdkRoot>..\SDK-2026-09-17</SdkRoot>
     <!-- The SDK libs expose the /MT flavour as a separate configuration. build.bat builds them. -->
     <SdkLibConfiguration Condition="'$(Configuration)'=='Release'">Release-Static</SdkLibConfiguration>

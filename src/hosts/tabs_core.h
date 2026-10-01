@@ -6,7 +6,7 @@
 // (dui_container.cpp) derive from it and supply the children and the host's colours and fonts
 // through the host_* hooks.
 //
-// Performance shape (PLAN.md 5):
+// Performance shape (see README, Performance):
 //  - a child's window is created the first time its tab is shown (lazy_children), never before;
 //  - a switch is one DeferWindowPos batch: show the new child (moved only if its rectangle went
 //    stale), hide the old one. Nothing else is touched and nothing is invalidated;
@@ -223,7 +223,7 @@ protected:
     void on_cover_accent_changed() noexcept override;
     void update_cover_subscription() noexcept;
 
-    // Auto-hide (PLAN.md 5.4) ------------------------------------------------------------------
+    // Auto-hide --------------------------------------------------------------------------------
     enum class AhTimer : std::uint8_t { none, reveal, hide };
     [[nodiscard]] bool auto_hide() const noexcept { return settings_.visibility == StripVisibility::auto_hide; }
     //! Auto-hide drawn over the panel: chosen, and the strip really is a layered child.

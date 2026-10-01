@@ -1,6 +1,6 @@
 #pragma once
 
-// The auto-hide hot zone (PLAN.md 5.4): a thin child window along the strip's edge that reports
+// The auto-hide hot zone: a thin child window along the strip's edge that reports
 // the pointer entering and leaving it (TrackMouseEvent, no polling) and clicks. On Windows 8+ it
 // is a layered child at alpha 1: invisible, still hit-testable, composed over the panel without
 // touching it. Where layered children are unavailable it is an ordinary child that paints a solid

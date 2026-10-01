@@ -79,7 +79,7 @@ enum StyleCommand : unsigned {
     style_last,
 };
 
-// Auto-hide timers (PLAN.md 5.4): the component's only timers, and only while something is due.
+// Auto-hide timers: the component's only timers, and only while something is due.
 constexpr UINT_PTR timer_ah_delay = 0xB701;
 constexpr UINT_PTR timer_ah_frame = 0xB702;
 
@@ -751,7 +751,7 @@ void TabsCore::layout() noexcept {
     if (ah) ah_raise();
 
     if (ah && strip_was_shown && !show && perf::enabled() && active_ != nullptr && active_->wnd != nullptr) {
-        // PLAN.md 5.4: hiding over the panel must not make the panel repaint. Measured here.
+        // Hiding over the panel must not make the panel repaint. Measured here.
         RECT dirty{};
         const bool invalidated = GetUpdateRect(active_->wnd, &dirty, FALSE) != FALSE;
         pfc::string_formatter f;
@@ -1591,7 +1591,7 @@ void TabsCore::on_strip_metrics_changed() noexcept {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Auto-hide (PLAN.md 5.4). Event driven: the hot zone and the strip report the pointer
+// Auto-hide. Event driven: the hot zone and the strip report the pointer
 // (TrackMouseEvent), menus, drags and focus pin it. One delay timer and, while a show/hide
 // animation runs, one frame timer. Nothing runs while idle.
 

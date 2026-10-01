@@ -32,7 +32,7 @@ inline constexpr GUID font_client = {
 //! Advanced preferences: Display > Better Tabs: log performance.
 inline constexpr GUID advconfig_perf = {
     0x8d873fcd, 0x9e52, 0x4fe6, {0x8d, 0xc8, 0x6f, 0xba, 0xe7, 0x12, 0x3b, 0x58}};
-//! Advanced preferences: wrap tab switches in WM_SETREDRAW (an experiment; see PLAN.md 5.1).
+//! Advanced preferences: wrap tab switches in WM_SETREDRAW (an experiment, off by default).
 inline constexpr GUID advconfig_setredraw = {
     0xc5621a99, 0xb628, 0x459c, {0x85, 0x68, 0x88, 0x5b, 0x50, 0x0c, 0x15, 0x64}};
 

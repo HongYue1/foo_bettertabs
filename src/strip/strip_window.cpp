@@ -100,7 +100,7 @@ enum class Edge : std::uint8_t { top, bottom, left, right };
     return colour::colorref_from_rgb(colour::from_lch(L, C, colour::hue(b)));
 }
 
-// The look (PLAN.md 6.1). Overlay strengths are alpha of the text colour over the strip.
+// The look. Overlay strengths are alpha of the text colour over the strip.
 constexpr float hover_alpha_dark = 0.08f;
 constexpr float hover_alpha_light = 0.06f;
 constexpr float chip_alpha = 0.05f;
@@ -1045,7 +1045,8 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
         if (listener_ != nullptr) listener_->on_strip_pointer();
         return 0;
     case WM_NOTIFY: {
-        // Only the tooltip's text request. Anything below 64 KB is no pointer (see PLAN.md 12).
+        // Only the tooltip's text request. Anything below 64 KB is no pointer:
+        // foobar2000 windows have been sent WM_NOTIFY with lParam 0 and 0x4E.
         if (lp < 0x10000) break;
         auto* header = reinterpret_cast<NMHDR*>(lp);
         if (header->hwndFrom == tooltip_ && header->code == TTN_GETDISPINFOW) {

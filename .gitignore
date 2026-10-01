@@ -20,6 +20,7 @@ Debug/
 *.pch
 *.fb2k-component
 test/out/
+test/tests.out
 dist/
 
 # Editor / OS

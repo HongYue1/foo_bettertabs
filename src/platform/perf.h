@@ -10,7 +10,7 @@ namespace bettertabs::perf {
 
 //! The advanced setting. Cheap (a cached config bool).
 [[nodiscard]] bool enabled() noexcept;
-//! Experimental: wrap a tab switch in WM_SETREDRAW (PLAN.md 5.1).
+//! Experimental: wrap a tab switch in WM_SETREDRAW (advanced setting, off by default).
 [[nodiscard]] bool use_setredraw() noexcept;
 
 //! Heap allocations made inside this DLL since it loaded (alloc_counter.cpp).

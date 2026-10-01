@@ -20,7 +20,6 @@ VALIDATE_COMPONENT_FILENAME("foo_bettertabs.dll");
 namespace bettertabs {
 namespace {
 
-// Nothing at startup: containers set themselves up when Columns UI creates them.
 class lifecycle : public initquit {
 public:
     void on_quit() override {
@@ -30,6 +29,19 @@ public:
 };
 
 FB2K_SERVICE_FACTORY(lifecycle);
+
+// The earliest stage: warm DirectWrite's process-wide caches on a CPU worker while foobar2000
+// reads its configuration, so the first container's font setup is not a cold ~150 ms on the main
+// thread. Nothing else is touched; the main thread at worst waits for whatever is left.
+class warm_up : public init_stage_callback {
+public:
+    void on_init_stage(t_uint32 stage) override {
+        if (stage != init_stages::before_config_read) return;
+        fb2k::inCpuWorkerThread([] { (void)gfx::warm_text(); });
+    }
+};
+
+FB2K_SERVICE_FACTORY(warm_up);
 
 } // namespace
 } // namespace bettertabs

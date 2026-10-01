@@ -29,4 +29,12 @@ void shutdown() noexcept;
 //! ClearType is on in Windows.
 [[nodiscard]] bool system_uses_cleartype() noexcept;
 
+//! Loads DirectWrite's process-wide caches (system font collection, system font fallback, a
+//! shaped layout, monitor rendering parameters) so the first container does not pay for them on
+//! the main thread (~150 ms cold, measured in 0.3.3). Safe on any thread: it uses its own
+//! reference to the shared factory and touches no other state here. Returns milliseconds spent.
+double warm_text() noexcept;
+//! For the perf log: "none" (never started), "running", or the milliseconds warm_text() took.
+void warm_text_status(char* out, unsigned size) noexcept;
+
 } // namespace bettertabs::gfx

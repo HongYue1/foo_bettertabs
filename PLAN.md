@@ -539,5 +539,12 @@ To add once verified in a build (AGENTS.md: verify before writing):
   0.2 ms, so the cost belongs to something in foobar2000's process reacting to window creation.
   `create` now splits the call at WM_NCCREATE and WM_CREATE (before = hooks such as CBT, after =
   WM_PARENTNOTIFY up the ancestors, WinEvent hooks), and the strip sets `WS_EX_NOPARENTNOTIFY`.
+- 0.3.4 (cause found): the 0.3.3 log put all 153 ms in "after WM_CREATE". That is the WM_SIZE
+  sent inside CreateWindowExW: `check_dpi()` saw `dpi_ == 0` as a DPI change and told the
+  container, which ran `refresh_font()` against a cold DirectWrite and asked Columns UI to
+  relayout. Fixed (the first DPI is not a change). The cold cost itself is real: render test
+  measures 191 ms cold vs 0.1 ms warm for system collection + system fallback + a layout +
+  monitor rendering params. `gfx::warm_text()` now runs on a CPU worker from
+  `init_stage_callback` at `before_config_read`; the perf line reports its time or "running".
 - Order: M(d) before M(e). The user is on Columns UI and can test auto-hide at once, and M(e)
   then reuses the finished strip, auto-hide included.

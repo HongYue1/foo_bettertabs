@@ -1286,7 +1286,9 @@ void TabsContainer::on_create(HWND wnd) noexcept {
                   << pfc::format_float(st.state_ms, 0, 3) << ", text " << pfc::format_float(st.text_ms, 0, 3) << "]";
             }
         }
-        f << ")";
+        char warm[32]{};
+        gfx::warm_text_status(warm, sizeof(warm));
+        f << "; text warm-up " << warm << ")";
         log::info(f.get_ptr());
     }
 }

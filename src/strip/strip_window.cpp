@@ -1015,7 +1015,12 @@ void StripWindow::check_dpi() noexcept {
     if (wnd_ == nullptr) return;
     const unsigned dpi = dpi_override_ != 0 ? dpi_override_ : gfx::window_dpi(wnd_);
     if (dpi == dpi_) return;
+    const bool first = dpi_ == 0;
     dpi_ = dpi;
+    // The WM_SIZE sent inside CreateWindowExW arrives before create() has set the DPI. That is not
+    // a change: create() builds everything next. Notifying here made the container refresh its
+    // font against a cold DirectWrite and relayout Columns UI mid-create (0.3.3: 153 ms).
+    if (first) return;
     rebuild_text_format();
     rebuild_items();
     update_thickness();

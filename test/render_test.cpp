@@ -269,6 +269,11 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
 int main() {
     SetProcessDPIAware();
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 2;
+    {
+        const double cold = gfx::warm_text();
+        const double warm = gfx::warm_text();
+        std::printf("text warm-up: cold %.3f ms, again %.3f ms\n", cold, warm);
+    }
     WNDCLASSW wc{};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);

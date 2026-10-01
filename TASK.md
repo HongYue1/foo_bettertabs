@@ -24,10 +24,9 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
 
 ## Waiting for
 
-- The user's 0.3.3 cold-start line: "window ... (to WM_NCCREATE, to WM_CREATE, after)". 0.3.2
-  showed 170.9 ms inside CreateWindowExW (0.2 ms in a plain process). Before WM_NCCREATE = a hook
-  in another component or the system (try with components disabled); after = WM_PARENTNOTIFY
-  (now off) or WinEvent hooks. Long-title shrink and Character Map fallback: confirmed.
+- The user's 0.3.4 cold-start line: own time should drop from ~155 ms to a few ms, with "text
+  warm-up NNN ms" (finished on the worker) at the end. If it says "running", the warm-up started
+  too late to finish first; then consider an earlier trigger. Cause and numbers: PLAN.md 14, 0.3.4.
 - Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
 
 ## Next

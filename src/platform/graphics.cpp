@@ -2,6 +2,13 @@
 
 #include "graphics.h"
 
+#include <dwrite_2.h>
+
+#include "com_ptr.h"
+
+#include <atomic>
+#include <cstdio>
+
 namespace bettertabs::gfx {
 
 namespace {
@@ -85,6 +92,73 @@ bool colour_fonts_supported() noexcept {
         return d2d1 != nullptr && GetProcAddress(d2d1, "D2D1ComputeMaximumScaleFactor") != nullptr;
     }();
     return value;
+}
+
+namespace {
+// 0 never started, 1 running, 2 done (g_warm_us valid).
+std::atomic<int> g_warm_state{0};
+std::atomic<long long> g_warm_us{0};
+} // namespace
+
+void warm_text_status(char* out, unsigned size) noexcept {
+    if (out == nullptr || size == 0) return;
+    const int state = g_warm_state.load();
+    if (state == 0) {
+        std::snprintf(out, size, "none");
+    } else if (state == 1) {
+        std::snprintf(out, size, "running");
+    } else {
+        std::snprintf(out, size, "%.3f ms", static_cast<double>(g_warm_us.load()) / 1000.0);
+    }
+}
+
+double warm_text() noexcept {
+    g_warm_state.store(1);
+    LARGE_INTEGER freq{};
+    LARGE_INTEGER start{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+    try {
+        com_ptr<IDWriteFactory> factory;
+        if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                          reinterpret_cast<IUnknown**>(factory.put())))) {
+            com_ptr<IDWriteFontCollection> fonts;
+            (void)factory->GetSystemFontCollection(fonts.put(), FALSE);
+            // Windows 8.1+: the system fallback Columns UI builds its emoji fallback from.
+            com_ptr<IDWriteFactory2> factory2;
+            if (SUCCEEDED(factory->QueryInterface(__uuidof(IDWriteFactory2), reinterpret_cast<void**>(factory2.put())))) {
+                com_ptr<IDWriteFontFallback> fallback;
+                (void)factory2->GetSystemFontFallback(fallback.put());
+            }
+            NONCLIENTMETRICSW ncm{};
+            ncm.cbSize = sizeof(ncm);
+            const wchar_t* family = L"Segoe UI";
+            if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0) && ncm.lfMessageFont.lfFaceName[0] != L'\0') {
+                family = ncm.lfMessageFont.lfFaceName;
+            }
+            com_ptr<IDWriteTextFormat> format;
+            if (SUCCEEDED(factory->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                                    DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"", format.put()))) {
+                com_ptr<IDWriteTextLayout> layout;
+                if (SUCCEEDED(factory->CreateTextLayout(L"Ag", 2, format.get(), 1000.0f, 1000.0f, layout.put()))) {
+                    DWRITE_TEXT_METRICS metrics{};
+                    (void)layout->GetMetrics(&metrics);
+                }
+            }
+            com_ptr<IDWriteRenderingParams> params;
+            (void)factory->CreateMonitorRenderingParams(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY),
+                                                        params.put());
+        }
+    } catch (...) {
+    }
+    LARGE_INTEGER end{};
+    QueryPerformanceCounter(&end);
+    const double ms = freq.QuadPart > 0
+                          ? static_cast<double>(end.QuadPart - start.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart)
+                          : 0.0;
+    g_warm_us.store(static_cast<long long>(ms * 1000.0));
+    g_warm_state.store(2);
+    return ms;
 }
 
 bool system_uses_cleartype() noexcept {

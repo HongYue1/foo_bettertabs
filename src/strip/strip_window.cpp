@@ -149,13 +149,27 @@ bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
 
     listener_ = &listener;
     cleartype_ = gfx::system_uses_cleartype();
-    const HWND wnd = CreateWindowExW(0, class_name, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 0, 0, parent,
+    lap(create_timings_.class_ms);
+    nccreate_qpc_ = 0;
+    create_qpc_ = 0;
+    const long long t_call = t.QuadPart;
+    // No WM_PARENTNOTIFY up the whole ancestor chain (every Columns UI splitter up to the main
+    // window): nothing needs it, and it is the one thing a create here sends outside the strip.
+    const HWND wnd = CreateWindowExW(WS_EX_NOPARENTNOTIFY, class_name, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 0, 0, parent,
                                      nullptr, module_instance(), this);
     if (wnd == nullptr) {
         listener_ = nullptr;
         return false;
     }
     lap(create_timings_.window_ms);
+    if (freq.QuadPart > 0 && nccreate_qpc_ != 0 && create_qpc_ != 0) {
+        const auto ms = [&](long long a, long long b) {
+            return static_cast<double>(b - a) * 1000.0 / static_cast<double>(freq.QuadPart);
+        };
+        create_timings_.to_nccreate_ms = ms(t_call, nccreate_qpc_);
+        create_timings_.to_create_ms = ms(nccreate_qpc_, create_qpc_);
+        create_timings_.after_create_ms = ms(create_qpc_, t.QuadPart);
+    }
     dpi_ = dpi_override_ != 0 ? dpi_override_ : gfx::window_dpi(wnd);
     const LRESULT ui_state = SendMessageW(wnd, WM_QUERYUISTATE, 0, 0);
     hide_focus_ = (ui_state & UISF_HIDEFOCUS) != 0;
@@ -853,6 +867,9 @@ const std::uint8_t* StripWindow::pixels(int& width, int& height, int& stride) co
 LRESULT CALLBACK StripWindow::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) noexcept {
     if (msg == WM_NCCREATE) {
         auto* self = static_cast<StripWindow*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        self->nccreate_qpc_ = now.QuadPart;
         self->wnd_ = wnd;
         SetWindowLongPtrW(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
@@ -872,6 +889,12 @@ LRESULT CALLBACK StripWindow::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM 
 
 LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
     switch (msg) {
+    case WM_CREATE: {
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        create_qpc_ = now.QuadPart;
+        return 0;
+    }
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: on_paint(); return 0;
     case WM_SIZE: on_size(LOWORD(lp), HIWORD(lp)); return 0;

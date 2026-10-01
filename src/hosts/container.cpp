@@ -1278,7 +1278,11 @@ void TabsContainer::on_create(HWND wnd) noexcept {
             f << step_names[i] << " " << pfc::format_float(steps[i], 0, 3);
             if (i == 1) {
                 const StripWindow::CreateTimings& st = strip_.create_timings();
-                f << " [window " << pfc::format_float(st.window_ms, 0, 3) << ", state "
+                f << " [class " << pfc::format_float(st.class_ms, 0, 3) << ", window "
+                  << pfc::format_float(st.window_ms, 0, 3) << " (to WM_NCCREATE "
+                  << pfc::format_float(st.to_nccreate_ms, 0, 3) << ", to WM_CREATE "
+                  << pfc::format_float(st.to_create_ms, 0, 3) << ", after "
+                  << pfc::format_float(st.after_create_ms, 0, 3) << "), state "
                   << pfc::format_float(st.state_ms, 0, 3) << ", text " << pfc::format_float(st.text_ms, 0, 3) << "]";
             }
         }

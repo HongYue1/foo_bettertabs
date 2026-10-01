@@ -534,5 +534,10 @@ To add once verified in a build (AGENTS.md: verify before writing):
   appears only when every tab is at its floor. Layout tests added.
 - Character Map button: `SearchPathW` for charmap.exe, else Microsoft's Segoe Fluent Icons page
   (debloated Windows has no charmap). `SEE_MASK_FLAG_NO_UI`, so no shell error box.
+- 0.3.3: the user's 0.3.2 log put 170.9 of 172.6 ms in the strip's `CreateWindowExW` alone (text
+  0.07 ms, so the throwaway format was not it). The same cold create in the render test takes
+  0.2 ms, so the cost belongs to something in foobar2000's process reacting to window creation.
+  `create` now splits the call at WM_NCCREATE and WM_CREATE (before = hooks such as CBT, after =
+  WM_PARENTNOTIFY up the ancestors, WinEvent hooks), and the strip sets `WS_EX_NOPARENTNOTIFY`.
 - Order: M(d) before M(e). The user is on Columns UI and can test auto-hide at once, and M(e)
   then reuses the finished strip, auto-hide included.

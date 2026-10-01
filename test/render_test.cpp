@@ -170,6 +170,16 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
             ++failures;
             return;
         }
+        static bool reported = false;
+        if (!reported) {
+            // A cold first strip in a plain process, to compare with foobar2000's console line.
+            reported = true;
+            const StripWindow::CreateTimings& st = strip.create_timings();
+            std::printf("first strip create: class %.3f ms, window %.3f ms (to WM_NCCREATE %.3f, to WM_CREATE %.3f, "
+                        "after %.3f), text %.3f ms\n",
+                        st.class_ms, st.window_ms, st.to_nccreate_ms, st.to_create_ms, st.after_create_ms,
+                        st.text_ms);
+        }
         strip.set_dpi_override(dpi);
         Settings s;
         s.indicator = look.indicator;

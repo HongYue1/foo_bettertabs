@@ -149,7 +149,14 @@ public:
     //! Where the last create() spent its time (perf log): window class + window, DPI and UI
     //! state, text format + items.
     struct CreateTimings {
+        //! RegisterClassExW (first strip only).
+        double class_ms{0.0};
+        //! CreateWindowExW in total, then split: call to WM_NCCREATE (CBT hooks and the like run
+        //! here), WM_NCCREATE to WM_CREATE, WM_CREATE to return (WinEvent hooks, WM_SIZE...).
         double window_ms{0.0};
+        double to_nccreate_ms{0.0};
+        double to_create_ms{0.0};
+        double after_create_ms{0.0};
         double state_ms{0.0};
         double text_ms{0.0};
     };
@@ -236,6 +243,9 @@ private:
     //! No text format is built before the host's first set_font(): it would be thrown away.
     bool font_set_{false};
     CreateTimings create_timings_{};
+    //! QueryPerformanceCounter at WM_NCCREATE / WM_CREATE of the window being created.
+    long long nccreate_qpc_{0};
+    long long create_qpc_{0};
     StripTextOptions text_options_{};
     //! The strip's own background, derived from the theme.
     COLORREF surface_{RGB(255, 255, 255)};

@@ -26,7 +26,8 @@ inline constexpr std::uint16_t no_tab = 0xFFFF;
 
 struct Settings {
     StripPosition position{StripPosition::top};
-    SideText side_text{SideText::horizontal};
+    //! Rotated since 0.3.1: horizontal text makes a side strip as wide as its longest title.
+    SideText side_text{SideText::rotated};
     TabSizing sizing{TabSizing::fit};
     TabAlign align{TabAlign::start};
 
@@ -68,6 +69,9 @@ struct Settings {
     bool icons_only{false};
     //! Ctrl+Tab / Ctrl+Shift+Tab cycle the tabs while focus is inside the container.
     bool ctrl_tab{true};
+    //! Longest title in DIPs before it is cut with an ellipsis (and shown whole as a tooltip);
+    //! 0 = no limit.
+    std::uint16_t max_tab_width{240};
 
     // Auto-hide.
     std::uint16_t hot_zone{4};

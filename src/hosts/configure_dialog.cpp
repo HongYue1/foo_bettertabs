@@ -323,6 +323,8 @@ private:
     void tab_from_controls(int id);
     void update_icon_preview();
     void move_selected(int delta);
+    //! Removes the selected tab (deleted when the dialog closes with OK).
+    void remove_selected();
 
     void changed();
 
@@ -460,6 +462,7 @@ void ConfigureDialog::settings_to_controls() {
     set_number(IDC_PAD_Y, s.pad_y);
     set_number(IDC_SPACING, s.spacing);
     set_number(IDC_THICKNESS, s.thickness);
+    set_number(IDC_MAX_WIDTH, s.max_tab_width);
 
     select(IDC_INDICATOR, static_cast<int>(s.indicator));
     check(IDC_CHIP, s.chip);
@@ -503,6 +506,7 @@ void ConfigureDialog::settings_from_controls() {
     s.pad_y = number(IDC_PAD_Y);
     s.spacing = number(IDC_SPACING);
     s.thickness = number(IDC_THICKNESS);
+    s.max_tab_width = number(IDC_MAX_WIDTH);
 
     pick(IDC_INDICATOR, s.indicator);
     s.chip = checked(IDC_CHIP);
@@ -553,10 +557,11 @@ void ConfigureDialog::update_enabled() {
     enable(IDC_TINT_VALUE, tint);
 
     const bool have = selected_ >= 0 && static_cast<std::size_t>(selected_) < state_.tabs.size();
-    for (const int id : {IDC_TAB_TITLE, IDC_TAB_TITLE_HELP, IDC_TAB_FORMAT, IDC_TAB_ICON, IDC_TAB_HIDDEN,
-                         IDC_TAB_ON_PLAY, IDC_TAB_ON_STOP}) {
+    for (const int id : {IDC_TAB_TITLE, IDC_TAB_TITLE_HELP, IDC_TAB_FORMAT, IDC_TAB_ICON, IDC_CHARMAP,
+                         IDC_TAB_HIDDEN, IDC_TAB_ON_PLAY, IDC_TAB_ON_STOP}) {
         enable(id, have);
     }
+    enable(IDC_REMOVE, live_ && have);
     enable(IDC_MOVE_UP, live_ && have && selected_ > 0);
     enable(IDC_MOVE_DOWN, live_ && have && static_cast<std::size_t>(selected_) + 1 < state_.tabs.size());
 }
@@ -626,6 +631,12 @@ void ConfigureDialog::tab_from_controls(int id) {
     e.hidden = checked(IDC_TAB_HIDDEN);
     e.show_on_play = checked(IDC_TAB_ON_PLAY);
     e.show_on_stop = checked(IDC_TAB_ON_STOP);
+    // One tab per event: the last one ticked.
+    for (std::size_t i = 0; i < state_.tabs.size(); ++i) {
+        if (i == index) continue;
+        if (id == IDC_TAB_ON_PLAY && e.show_on_play) state_.tabs[i].extra.show_on_play = false;
+        if (id == IDC_TAB_ON_STOP && e.show_on_stop) state_.tabs[i].extra.show_on_stop = false;
+    }
 
     const HWND list = control(IDC_TAB_LIST);
     ::SendMessageW(list, LB_DELETESTRING, index, 0);
@@ -651,6 +662,15 @@ void ConfigureDialog::move_selected(int delta) {
     std::swap(state_.tabs[static_cast<std::size_t>(selected_)], state_.tabs[static_cast<std::size_t>(target)]);
     fill_tab_list();
     select_tab(target);
+    changed();
+}
+
+void ConfigureDialog::remove_selected() {
+    if (!live_ || selected_ < 0 || static_cast<std::size_t>(selected_) >= state_.tabs.size()) return;
+    state_.tabs.erase(state_.tabs.begin() + selected_);
+    const int next = (std::min)(selected_, static_cast<int>(state_.tabs.size()) - 1);
+    fill_tab_list();
+    select_tab(next);
     changed();
 }
 
@@ -687,6 +707,12 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
     }
     case IDC_TAB_TITLE_HELP:
         if (code == BN_CLICKED) open_titleformat_help(m_hWnd);
+        return;
+    case IDC_REMOVE:
+        if (code == BN_CLICKED) remove_selected();
+        return;
+    case IDC_CHARMAP:
+        if (code == BN_CLICKED) ::ShellExecuteW(m_hWnd, L"open", L"charmap.exe", nullptr, nullptr, SW_SHOWNORMAL);
         return;
     case IDC_MOVE_UP:
     case IDC_MOVE_DOWN:

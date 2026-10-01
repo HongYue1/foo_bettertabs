@@ -402,6 +402,7 @@ Each ends with both architectures built, `dumpbin` clean, a test checklist, and 
 | b | Colour + font clients, dark mode live, indicator styles, accent (selection/custom/cover), rounded/chip, overflow chevron + menu, DPI | 0.2.0 |
 | c | Configure dialog (4 tabs, live preview), all options, per-tab titles/icons/hidden, title format, mouse/keyboard incl. Ctrl+Tab filter, follow playback, remember tab | 0.3.0 |
 | d | Auto-hide (hot zone, overlay Win8+/Win7 fallback, push, pins, delays), animations (indicator slide, strip cross-fade, show/hide slide/fade) | 0.4.0 |
+| e (proposed) | Default UI container: a `ui_element` reusing `StripWindow` and `src/model`, hosting DUI child elements, DUI colours/fonts; the fallback when Columns UI is absent | 0.5.0 |
 | - | README with screenshots (foo_osd style), `.fb2k-component`, skill updates | 1.0.0 |
 
 Test matrix (every milestone where it applies): two instances side by side; better tab nested in
@@ -503,3 +504,21 @@ To add once verified in a build (AGENTS.md: verify before writing):
 - Middle click hides ("remove" is reserved and read as hide). Drag reorder moves the tab next to
   the one it is dropped on; hidden tabs keep their place.
 - Perf log: container creation now reports own time and panel creation time separately.
+
+### 0.3.1 (fixes from the user's M(c) test)
+
+- Follow playback: `PlaybackWatch` defers every event with `fb2k::inMainThread` (creating Artwork
+  view or Item properties inside the play callback crashed at startup). "Starts" fires from
+  `on_playback_starting` unless the command is `track_command_resume` (play, next, previous,
+  double click; not the session resume at startup, not a playlist advancing). "Stops" fires on
+  user stop and end of playlist, not at shutdown. The dialog keeps one tab per event.
+- Tab removal: Remove on the Tabs page (off from the Layout page). `Tab::pending_removal`, hidden
+  by `tab_visible`, previewed at the end, deleted by `commit_removals()` on OK; Cancel restores.
+- Longest title (`max_tab_width`, id 36, 240 DIPs default, 0 = no limit, 0-2000) through
+  `StripWindow::capped_width()`; the full title is the tooltip.
+- Rotated side text is the default. Strip page reorganised (Position/thickness/rotate, then Tabs);
+  "Show the strip" moved to a Strip section on the Behaviour page; Character Map button and code
+  point hint under the icon field.
+- Startup: the first container took ~155 ms of its own time (later ones 3-5 ms). The creation log
+  line now lists per-step timings (shared, strip, cover, colours, font, objects, layout, activate)
+  to locate it; fix pending the user's log.

@@ -28,6 +28,7 @@
 #define IDC_PAD_Y 1016
 #define IDC_SPACING 1017
 #define IDC_THICKNESS 1018
+#define IDC_MAX_WIDTH 1019
 
 // Look
 #define IDC_INDICATOR 1030
@@ -57,6 +58,8 @@
 #define IDC_TAB_HIDDEN 1058
 #define IDC_TAB_ON_PLAY 1059
 #define IDC_TAB_ON_STOP 1060
+#define IDC_REMOVE 1061
+#define IDC_CHARMAP 1062
 
 // Behaviour
 #define IDC_WHEEL 1070

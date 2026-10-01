@@ -24,7 +24,7 @@ bool same_guid(const GUID& a, const GUID& b) { return std::memcmp(&a, &b, sizeof
 Settings odd_settings() {
     Settings s;
     s.position = StripPosition::left;
-    s.side_text = SideText::rotated;
+    s.side_text = SideText::horizontal;
     s.sizing = TabSizing::fill;
     s.align = TabAlign::centre;
     s.pad_x = 20;
@@ -58,6 +58,7 @@ Settings odd_settings() {
     s.tint_strength = 20;
     s.icons_only = true;
     s.ctrl_tab = false;
+    s.max_tab_width = 100;
     return s;
 }
 

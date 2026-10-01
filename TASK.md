@@ -15,16 +15,26 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   children. Confirmed by the user.
 - **M(b) 0.2.0-0.2.2**: appearance (PLAN.md section 13). Confirmed by the user.
 - **M(c) 0.3.0**: Configure dialog, rename, icons, title formatting, middle click, drag reorder,
-  Ctrl+Tab, follow playback, hidden tabs menu (PLAN.md section 14).
+  Ctrl+Tab, follow playback, hidden tabs menu (PLAN.md section 14). Tested by the user: all pass
+  except follow playback (crash), long titles, and startup time.
+- **0.3.1**: fixes from that test (PLAN.md section 14, "0.3.1"). Built x64 + Win32, tests
+  `EXIT=0 0 0 0`, `dialog_check` 0 problems. No Columns UI import in the DLL.
 
 ## Waiting for
 
-- The user's M(c) test run, including screenshots of every Configure page in light and dark mode.
+- The user's 0.3.1 test, especially the new "container created ... (shared ..., strip ..., ...)"
+  console line from a cold start: it says which step costs the ~155 ms. Then fix that step
+  (suspects: cold D2D/DWrite factory, system font collection, `cui::fonts::get_font` + fallback).
+- Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
+- The user's answer on when to do M(e) (Default UI container, PLAN.md section 9).
 
 ## Next
 
-- M(d): auto-hide + animations (an Auto-hide page in the Configure dialog).
+- M(d): auto-hide + animations (an Auto-hide page in the Configure dialog; "Show the strip" gets
+  an auto-hide entry). Then M(e) unless the user wants it sooner.
 - README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
   semantics, Tab stack host behaviour and is_point_ours, transparent children forward
   WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then
-  get_config; ListView vs dark-mode hooks).
+  get_config; ListView vs dark-mode hooks: the hooks replace a report ListView with a list that
+  doesn't copy items, so use a list box; play callbacks must not create panels inline, defer with
+  `fb2k::inMainThread`).

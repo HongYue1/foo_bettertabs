@@ -212,6 +212,8 @@ private:
     [[nodiscard]] bool chevron_hit(POINT pt) const noexcept;
     void invalidate_tab(std::size_t index) noexcept;
     [[nodiscard]] int px(int dips) const noexcept;
+    //! content_width() with the title cut to Settings::max_tab_width.
+    [[nodiscard]] int capped_width(const Item& item) const noexcept;
 
     void draw_tab(std::size_t index) noexcept;
     void draw_chevron() noexcept;

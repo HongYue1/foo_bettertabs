@@ -482,7 +482,7 @@ void StripWindow::update_thickness() noexcept {
         value = tallest + 2 * pad_y;
     } else {
         int widest = 0;
-        for (const Item& item : items_) widest = (std::max)(widest, item.content_width());
+        for (const Item& item : items_) widest = (std::max)(widest, capped_width(item));
         value = std::clamp(widest + 2 * pad_x, px(48), px(280));
     }
     value = (std::max)(value, px(settings_.thickness));
@@ -496,7 +496,7 @@ void StripWindow::relayout() noexcept {
     try {
         extents_.resize(items_.size());
         for (std::size_t i = 0; i < items_.size(); ++i) {
-            extents_[i] = along_text ? items_[i].content_width() + 2 * pad_x
+            extents_[i] = along_text ? capped_width(items_[i]) + 2 * pad_x
                                      : (std::max)(line_height_, items_[i].icon_height) + 2 * pad_y;
         }
         StripLayoutInput in;
@@ -518,11 +518,12 @@ void StripWindow::relayout() noexcept {
     for (std::size_t i = 0; i < items_.size(); ++i) {
         Item& item = items_[i];
         if (!item.layout) continue;
-        int room = item.text_width;
+        int room = settings_.max_tab_width != 0 ? px(settings_.max_tab_width) : item.text_width;
         if (i < layout_.tabs.size() && layout_.tabs[i].length > 0) {
             room = along_text ? layout_.tabs[i].length - 2 * pad_x : across_room;
             room -= item.icon_width + item.icon_gap;
         }
+        if (settings_.max_tab_width != 0) room = (std::min)(room, px(settings_.max_tab_width));
         room = (std::max)(0, room);
         const int draw = (std::min)(item.text_width, room);
         if (draw != item.draw_width) {
@@ -530,6 +531,12 @@ void StripWindow::relayout() noexcept {
             item.draw_width = draw;
         }
     }
+}
+
+int StripWindow::capped_width(const Item& item) const noexcept {
+    int text = item.text_width;
+    if (settings_.max_tab_width != 0) text = (std::min)(text, px(settings_.max_tab_width));
+    return item.icon_width + item.icon_gap + text;
 }
 
 int StripWindow::px(int dips) const noexcept { return MulDiv(dips, static_cast<int>(dpi_), 96); }

@@ -43,8 +43,9 @@ BEGIN
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
     LTEXT           "Position:",IDC_STATIC,12,23,84,8
     COMBOBOX        IDC_POSITION,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Show the strip:",IDC_STATIC,12,39,84,8
-    COMBOBOX        IDC_VISIBILITY,99,37,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Strip thickness:",IDC_STATIC,12,39,84,8
+    EDITTEXT        IDC_THICKNESS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs, 0 follows the font (0-200)",IDC_STATIC,131,39,162,8
     CONTROL         "Rotate the text on side strips",IDC_ROTATE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,53,281,10
 
     LTEXT           "Tabs",IDC_STATIC,7,75,286,8
@@ -53,18 +54,18 @@ BEGIN
     COMBOBOX        IDC_SIZING,99,92,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Alignment:",IDC_STATIC,12,110,84,8
     COMBOBOX        IDC_ALIGN,99,108,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Padding across:",IDC_STATIC,12,126,84,8
-    EDITTEXT        IDC_PAD_X,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,126,162,8
-    LTEXT           "Padding along:",IDC_STATIC,12,142,84,8
-    EDITTEXT        IDC_PAD_Y,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,142,162,8
-    LTEXT           "Spacing:",IDC_STATIC,12,158,84,8
-    EDITTEXT        IDC_SPACING,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,158,162,8
-    LTEXT           "Strip thickness:",IDC_STATIC,12,174,84,8
-    EDITTEXT        IDC_THICKNESS,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs, 0 follows the font (0-200)",IDC_STATIC,131,174,162,8
+    LTEXT           "Longest title:",IDC_STATIC,12,126,84,8
+    EDITTEXT        IDC_MAX_WIDTH,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs, then cut with an ellipsis (0 = no limit)",IDC_STATIC,131,126,162,8
+    LTEXT           "Padding across:",IDC_STATIC,12,142,84,8
+    EDITTEXT        IDC_PAD_X,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,142,162,8
+    LTEXT           "Padding along:",IDC_STATIC,12,158,84,8
+    EDITTEXT        IDC_PAD_Y,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,158,162,8
+    LTEXT           "Spacing:",IDC_STATIC,12,174,84,8
+    EDITTEXT        IDC_SPACING,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,174,162,8
 END
 
 IDD_PAGE_LOOK DIALOGEX 0, 0, 300, 198
@@ -109,43 +110,50 @@ FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
     LTEXT           "Tabs",IDC_STATIC,7,4,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    LISTBOX         IDC_TAB_LIST,12,21,227,72,LBS_NOTIFY | LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    LISTBOX         IDC_TAB_LIST,12,21,227,56,LBS_NOTIFY | LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
     PUSHBUTTON      "Move up",IDC_MOVE_UP,243,21,50,14
     PUSHBUTTON      "Move down",IDC_MOVE_DOWN,243,37,50,14
+    PUSHBUTTON      "Remove",IDC_REMOVE,243,59,50,14
 
-    LTEXT           "Selected tab",IDC_STATIC,7,105,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,115,286,1
-    LTEXT           "Title:",IDC_STATIC,12,124,84,8
-    EDITTEXT        IDC_TAB_TITLE,99,122,140,12,ES_AUTOHSCROLL
-    PUSHBUTTON      "Help",IDC_TAB_TITLE_HELP,243,121,50,14
-    CONTROL         "Use title formatting",IDC_TAB_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,138,140,10
-    LTEXT           "Icon:",IDC_STATIC,12,154,84,8
-    EDITTEXT        IDC_TAB_ICON,99,152,40,12,ES_AUTOHSCROLL
-    LTEXT           "",IDC_TAB_ICON_PREVIEW,143,150,18,15,SS_CENTER | SS_NOPREFIX
-    LTEXT           "Code point (E8D6) or the character",IDC_STATIC,165,154,128,8
-    CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,168,281,10
-    CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,182,136,10
-    CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,182,138,10
+    LTEXT           "Selected tab",IDC_STATIC,7,87,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,97,286,1
+    LTEXT           "Title:",IDC_STATIC,12,106,84,8
+    EDITTEXT        IDC_TAB_TITLE,99,104,140,12,ES_AUTOHSCROLL
+    PUSHBUTTON      "Help",IDC_TAB_TITLE_HELP,243,103,50,14
+    CONTROL         "Use title formatting",IDC_TAB_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,120,140,10
+    LTEXT           "Icon:",IDC_STATIC,12,136,84,8
+    EDITTEXT        IDC_TAB_ICON,99,134,40,12,ES_AUTOHSCROLL
+    LTEXT           "",IDC_TAB_ICON_PREVIEW,143,132,18,15,SS_CENTER | SS_NOPREFIX
+    PUSHBUTTON      "Character Map",IDC_CHARMAP,229,133,64,14
+    LTEXT           "A code point (E8D6) or the character. Icons: Segoe Fluent Icons or Segoe MDL2 Assets in Character Map. Emoji: Win+.",IDC_STATIC,99,150,194,16
+    CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,170,281,10
+    CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,184,136,10
+    CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,184,138,10
 END
 
 IDD_PAGE_BEHAVIOUR DIALOGEX 0, 0, 300, 198
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
-    LTEXT           "Mouse and keyboard",IDC_STATIC,7,4,286,8
+    LTEXT           "Strip",IDC_STATIC,7,4,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,21,281,10
-    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,35,281,10
-    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,49,281,10
-    LTEXT           "Middle click:",IDC_STATIC,12,65,84,8
-    COMBOBOX        IDC_MIDDLE,99,63,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Show the strip:",IDC_STATIC,12,23,84,8
+    COMBOBOX        IDC_VISIBILITY,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    LTEXT           "Panels",IDC_STATIC,7,87,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,97,286,1
-    CONTROL         "Create a panel only when its tab is first shown",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,104,281,10
-    LTEXT           "Faster startup. Switching it off creates every panel up front.",IDC_STATIC,22,116,271,8
-    CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,128,281,10
-    CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,142,281,10
+    LTEXT           "Mouse and keyboard",IDC_STATIC,7,45,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,55,286,1
+    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,62,281,10
+    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,76,281,10
+    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,90,281,10
+    LTEXT           "Middle click:",IDC_STATIC,12,106,84,8
+    COMBOBOX        IDC_MIDDLE,99,104,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Panels",IDC_STATIC,7,128,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,138,286,1
+    CONTROL         "Create a panel only when its tab is first shown",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,145,281,10
+    LTEXT           "Faster startup. Switching it off creates every panel up front.",IDC_STATIC,22,157,271,8
+    CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,169,281,10
+    CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,183,281,10
 END
 
 /////////////////////////////////////////////////////////////////////////////

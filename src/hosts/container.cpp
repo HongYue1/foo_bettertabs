@@ -185,6 +185,8 @@ struct Tab {
     //! The compiled title when it is title formatting, and the text it was compiled from.
     titleformat_object::ptr script;
     std::string script_source;
+    //! Removed in the open Configure dialog: not shown, deleted when it closes with OK.
+    bool pending_removal{false};
 };
 
 //! A code point as UTF-16; empty for none or anything that is not a scalar value.
@@ -314,6 +316,8 @@ private:
     //! Moves tabs_[from] to position `to`.
     void move_tab(std::size_t from, std::size_t to) noexcept;
     void rename_tab(Tab* tab) noexcept;
+    //! Deletes the tabs the Configure dialog removed.
+    void commit_removals() noexcept;
 
     void rebuild_strip() noexcept;
     [[nodiscard]] std::size_t strip_index_of(const Tab* tab) const noexcept;
@@ -434,30 +438,37 @@ void broadcast(PlaybackEvent event) noexcept {
     }
 }
 
+//! Never from inside the play callback itself: following playback can create a panel, and a
+//! panel that registers its own play callback while the callbacks are being dispatched crashed
+//! foobar2000 (Artwork view, Item properties).
+void post(PlaybackEvent event) noexcept {
+    try {
+        fb2k::inMainThread([event] { broadcast(event); });
+    } catch (...) {
+    }
+}
+
 class PlaybackWatch : public play_callback_impl_base {
 public:
     PlaybackWatch()
-        : play_callback_impl_base(flag_on_playback_new_track | flag_on_playback_stop | flag_on_playback_pause |
-                                  flag_on_playback_edited | flag_on_playback_dynamic_info_track),
-          playing_(playback_control::get()->is_playing()) {}
+        : play_callback_impl_base(flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_stop |
+                                  flag_on_playback_pause | flag_on_playback_edited |
+                                  flag_on_playback_dynamic_info_track) {}
 
-    void on_playback_new_track(metadb_handle_ptr) override {
-        const bool started = !playing_;
-        playing_ = true;
-        broadcast(started ? PlaybackEvent::started : PlaybackEvent::title);
+    //! Playback the user started: play, next, previous, a double-clicked track. Not the next
+    //! track of a playlist, and not the session resumed when foobar2000 starts.
+    void on_playback_starting(play_control::t_track_command command, bool) override {
+        if (command != play_control::track_command_resume) post(PlaybackEvent::started);
     }
+    void on_playback_new_track(metadb_handle_ptr) override { post(PlaybackEvent::title); }
     void on_playback_stop(play_control::t_stop_reason reason) override {
         if (reason == play_control::stop_reason_starting_another) return; // a new track follows
-        playing_ = false;
         // Not while foobar2000 shuts down: that would create panels only to destroy them.
-        if (reason != play_control::stop_reason_shutting_down) broadcast(PlaybackEvent::stopped);
+        if (reason != play_control::stop_reason_shutting_down) post(PlaybackEvent::stopped);
     }
-    void on_playback_pause(bool) override { broadcast(PlaybackEvent::title); }
-    void on_playback_edited(metadb_handle_ptr) override { broadcast(PlaybackEvent::title); }
-    void on_playback_dynamic_info_track(const file_info&) override { broadcast(PlaybackEvent::title); }
-
-private:
-    bool playing_{false};
+    void on_playback_pause(bool) override { post(PlaybackEvent::title); }
+    void on_playback_edited(metadb_handle_ptr) override { post(PlaybackEvent::title); }
+    void on_playback_dynamic_info_track(const file_info&) override { post(PlaybackEvent::title); }
 };
 
 //! Ctrl+Tab and Ctrl+Shift+Tab anywhere inside a container. The innermost container that takes
@@ -781,7 +792,7 @@ std::wstring TabsContainer::panel_name(const Tab& tab) const {
 }
 
 bool TabsContainer::tab_visible(const Tab& tab) const noexcept {
-    return !tab.extra.hidden && tab.window.is_valid();
+    return !tab.extra.hidden && !tab.pending_removal && tab.window.is_valid();
 }
 
 Tab* TabsContainer::find_by_wnd(HWND wnd) const noexcept {
@@ -1205,17 +1216,40 @@ void TabsContainer::on_create(HWND wnd) noexcept {
     const std::uint64_t t_start = measure ? perf::now() : 0;
     in_create_ = true;
     child_ms_ = 0.0;
+    // Per-step timings for the log line (startup investigation, 0.3.1). Panel creation inside a
+    // step is excluded from it, so each number is this component's own time.
+    constexpr std::size_t step_count = 8;
+    static constexpr const char* step_names[step_count] = {"shared", "strip", "cover",  "colours",
+                                                           "font",   "objects", "layout", "activate"};
+    double steps[step_count]{};
+    std::uint64_t t_step = t_start;
+    double child_before = 0.0;
+    const auto step = [&](std::size_t index) {
+        if (!measure) return;
+        const std::uint64_t t = perf::now();
+        steps[index] = (std::max)(0.0, perf::elapsed_ms(t_step, t) - (child_ms_ - child_before));
+        child_before = child_ms_;
+        t_step = t;
+    };
     attach_shared();
+    step(0);
     try {
         host_ = fb2k::service_new<TabsHost>(this);
         if (!strip_.create(wnd, *this)) log::warn("could not create the tab strip");
         strip_.set_settings(settings_);
+        step(1);
         update_cover_subscription();
-        refresh_appearance();
+        step(2);
+        refresh_colours();
+        step(3);
+        refresh_font();
+        step(4);
         GetClientRect(wnd, &content_);
         for (auto& tab : tabs_) ensure_object(*tab);
+        step(5);
         rebuild_strip();
         layout();
+        step(6);
         if (!settings_.lazy_children) {
             for (auto& tab : tabs_) {
                 if (tab_visible(*tab)) ensure_window(*tab);
@@ -1223,6 +1257,7 @@ void TabsContainer::on_create(HWND wnd) noexcept {
         }
         ensure_active_valid();
         layout();
+        step(7);
     } catch (const std::exception& e) {
         log::warn(std::string("could not set up the container: ") + e.what());
     }
@@ -1237,7 +1272,12 @@ void TabsContainer::on_create(HWND wnd) noexcept {
         f << "container created with " << pfc::format_uint(tabs_.size()) << " tabs (" << pfc::format_uint(created)
           << " panel windows) in " << pfc::format_float(total, 0, 3) << " ms: own "
           << pfc::format_float((std::max)(0.0, total - child_ms_), 0, 3) << " ms, panels "
-          << pfc::format_float(child_ms_, 0, 3) << " ms";
+          << pfc::format_float(child_ms_, 0, 3) << " ms (";
+        for (std::size_t i = 0; i < step_count; ++i) {
+            if (i != 0) f << ", ";
+            f << step_names[i] << " " << pfc::format_float(steps[i], 0, 3);
+        }
+        f << ")";
         log::info(f.get_ptr());
     }
 }
@@ -1951,29 +1991,60 @@ bool TabsContainer::show_config_popup(HWND parent) {
     }
     // Cancel puts back what the live preview changed.
     preview(ok ? state : original);
+    if (ok) commit_removals();
     config_tabs_.clear();
     return ok;
+}
+
+void TabsContainer::commit_removals() noexcept {
+    bool removed = false;
+    for (std::size_t i = tabs_.size(); i-- > 0;) {
+        Tab* tab = tabs_[i].get();
+        if (!tab->pending_removal) continue;
+        if (tab == active_) active_ = nullptr;
+        if (get_wnd() != nullptr) destroy_tab_window(*tab);
+        tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(i));
+        if (saved_active_ > i) --saved_active_;
+        removed = true;
+    }
+    if (!removed || get_wnd() == nullptr) return;
+    rebuild_strip();
+    ensure_active_valid();
+    layout();
+    limits_changed();
 }
 
 void TabsContainer::preview(const ConfigureState& state) noexcept {
     try {
         settings_ = state.settings;
         clamp(settings_);
-        // The dialog's order, if it still describes exactly the tabs this container has.
+        // The dialog's order, if it still describes the tabs this container has. Tabs the
+        // dialog removed go to the end, marked; they are deleted only on OK.
         const std::size_t count = tabs_.size();
-        bool same = state.tabs.size() == count && config_tabs_.size() == count;
+        bool same = state.tabs.size() <= count && config_tabs_.size() == count;
         std::vector<size_t> order;
-        for (std::size_t i = 0; same && i < count; ++i) {
+        std::vector<bool> kept(count, false);
+        for (std::size_t i = 0; same && i < state.tabs.size(); ++i) {
             const std::size_t id = state.tabs[i].id;
             const std::size_t index = id < config_tabs_.size() ? index_of(config_tabs_[id]) : no_index;
-            if (index == no_index) same = false;
+            if (index == no_index || kept[index]) {
+                same = false;
+                break;
+            }
+            kept[index] = true;
             order.push_back(index);
         }
         if (same) {
+            for (std::size_t i = 0; i < count; ++i) {
+                if (!kept[i]) order.push_back(i);
+            }
             reorder_panels(order.data(), order.size());
             for (std::size_t i = 0; i < count; ++i) {
-                tabs_[i]->extra = state.tabs[i].extra;
-                update_label(*tabs_[i]);
+                Tab& tab = *tabs_[i];
+                tab.pending_removal = i >= state.tabs.size();
+                if (tab.pending_removal) continue;
+                tab.extra = state.tabs[i].extra;
+                update_label(tab);
             }
         }
         if (get_wnd() == nullptr) return;

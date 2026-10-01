@@ -30,6 +30,9 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
 - **0.4.0 beta 3** (M(d) step 2): tab switch animation, indicator slide + colour cross-fade
   (PLAN.md section 14, "0.4.0 beta 3"). Confirmed by the user. Beta 4: text colours change at once,
   only the indicator slides. Confirmed. **0.4.0 released (M(d) done).**
+- **0.5.0 beta 1** (M(e)): `TabsCore` refactor (CUI host now ~700 lines) and the Default UI
+  element (PLAN.md section 14, "0.5.0 beta 1"). Built x64 + Win32, 0 warnings, tests pass, 0
+  dialog problems. Not yet tested by the user.
 
 ## Waiting for
 
@@ -38,8 +41,8 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
 
 ## Next
 
-- Fixes from the beta 3 test, then 0.4.0 final (M(d) done; the Win7 owned-popup overlay stays a
-  fallback to push unless asked for). Then M(e) (Default UI container).
+- User test of 0.5.0 beta 1: Columns UI regression and the Default UI element (adding, edit
+  menus, colours/fonts/dark mode, focus, Ctrl+Tab, nesting, missing elements). Fixes, then 0.5.0.
 - README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
   semantics, Tab stack host behaviour and is_point_ours, transparent children forward
   WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then

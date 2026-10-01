@@ -110,6 +110,8 @@
     <ClCompile Include="src\component.cpp" />
     <ClCompile Include="src\hosts\configure_dialog.cpp" />
     <ClCompile Include="src\hosts\container.cpp" />
+    <ClCompile Include="src\hosts\dui_container.cpp" />
+    <ClCompile Include="src\hosts\tabs_core.cpp" />
     <ClCompile Include="src\model\codec.cpp" />
     <ClCompile Include="src\model\cover_accent.cpp" />
     <ClCompile Include="src\platform\alloc_counter.cpp" />
@@ -135,6 +137,8 @@
     <ClInclude Include="src\strip\strip_layout.h" />
     <ClInclude Include="src\strip\strip_window.h" />
     <ClInclude Include="src\hosts\configure_dialog.h" />
+    <ClInclude Include="src\hosts\host_util.h" />
+    <ClInclude Include="src\hosts\tabs_core.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <!-- The Configure and Rename dialogs. One .rc, hand-written; see resource.h for the IDs. -->

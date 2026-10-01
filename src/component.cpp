@@ -10,8 +10,9 @@
 #include "version.h"
 
 DECLARE_COMPONENT_VERSION(BETTERTABS_NAME, BETTERTABS_VERSION,
-                          "A fast, modern tab container for Columns UI.\n"
-                          "Add it from the Layout page (Splitters > " BETTERTABS_NAME ").\n\n"
+                          "A fast, modern tab container for Columns UI and the Default UI.\n"
+                          "Columns UI: add it from the Layout page (Splitters > " BETTERTABS_NAME ").\n"
+                          "Default UI: add it in layout editing mode (Containers > " BETTERTABS_NAME ").\n\n"
                           "No third-party component dependencies.");
 
 // Stops users from renaming the DLL, which would confuse the troubleshooter.

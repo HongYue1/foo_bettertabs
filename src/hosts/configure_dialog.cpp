@@ -370,8 +370,11 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_ALIGN), {L"Start", L"Centre", L"End"});
     fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only"});
     // Order matters: AccentSource and StripBackground, one for one.
-    fill_combo(control(IDC_ACCENT_SOURCE), {L"Columns UI selection colour", L"Custom colour", L"From the playing cover"});
-    fill_combo(control(IDC_BACKGROUND), {L"Columns UI background", L"Custom colour", L"Tinted with the accent"});
+    const std::wstring ui = state_.ui_name != nullptr ? state_.ui_name : L"Columns UI";
+    const std::wstring ui_selection = ui + L" selection colour";
+    const std::wstring ui_background = ui + L" background";
+    fill_combo(control(IDC_ACCENT_SOURCE), {ui_selection.c_str(), L"Custom colour", L"From the playing cover"});
+    fill_combo(control(IDC_BACKGROUND), {ui_background.c_str(), L"Custom colour", L"Tinted with the accent"});
     fill_combo(control(IDC_MIDDLE), {L"Does nothing", L"Hides the tab"});
 
     icon_font_ = make_font(m_hWnd, system_icon_family(), 12);

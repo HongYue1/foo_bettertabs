@@ -1,12 +1,7 @@
 // The Columns UI container: a uie::splitter_window_v3 that shows one child at a time under a tab
-// strip. It owns the children and the strip window; the strip owns all drawing.
-//
-// Performance shape (PLAN.md 5):
-//  - a child's window is created the first time its tab is shown (lazy_children), never before;
-//  - a switch is one DeferWindowPos batch: show the new child (moved only if its rectangle went
-//    stale), hide the old one. Nothing else is touched and nothing is invalidated;
-//  - a resize moves the strip and the active child only; hidden children catch up when shown;
-//  - no timers, hooks or polling while idle.
+// strip. Everything that does not depend on Columns UI lives in TabsCore (tabs_core.h); this
+// file supplies the children (uie::window), the host handed to them, Columns UI's colours and
+// fonts, and the splitter interface the Layout page and live editing use.
 //
 // Behaviour follows Columns UI's own Tab stack wherever the SDK leaves room for choice
 // (foo_ui_columns/splitter_tabs.cpp): host semantics, missing panels, config items, export.
@@ -15,94 +10,23 @@
 
 #include <columns_ui-sdk/ui_extension.h>
 
-#include <commdlg.h>
-#include <windowsx.h>
-
-#pragma comment(lib, "comdlg32.lib")
-
 #include <algorithm>
-#include <array>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "../guids.h"
 #include "../model/codec.h"
-#include "../model/colour.h"
-#include "../model/settings.h"
-#include "../platform/cover_hub.h"
 #include "../platform/graphics.h"
 #include "../platform/logging.h"
-#include "../platform/perf.h"
-#include "../strip/hot_zone.h"
-#include "../strip/strip_window.h"
 #include "../version.h"
-#include "configure_dialog.h"
+#include "host_util.h"
+#include "tabs_core.h"
 
 namespace bettertabs {
 
 namespace {
-
-class TabsContainer;
-
-//! Live containers, for the colour and font clients (singletons with const callbacks). Main thread.
-std::vector<TabsContainer*>& live_containers() {
-    static std::vector<TabsContainer*> list;
-    return list;
-}
-
-constexpr unsigned menu_tab_base = 1;
-//! Commands on the clicked tab, then one id per hidden tab (tabs_ index).
-constexpr unsigned menu_cmd_base = 3000;
-enum TabCommand : unsigned {
-    cmd_rename = menu_cmd_base,
-    cmd_hide,
-    cmd_move_back,
-    cmd_move_forward,
-    cmd_configure,
-};
-constexpr unsigned menu_unhide_base = 3100;
-//! The Appearance submenu (until the Configure dialog in M(c), and kept as quick access after).
-constexpr unsigned menu_style_base = 5000;
-constexpr unsigned menu_panel_base = 10000;
-
-enum StyleCommand : unsigned {
-    style_position_top = menu_style_base,
-    style_position_bottom,
-    style_position_left,
-    style_position_right,
-    style_rotate_side_text,
-    style_indicator_underline,
-    style_indicator_pill,
-    style_indicator_none,
-    style_chip,
-    style_accent_selection,
-    style_accent_cover,
-    style_accent_custom,
-    style_sizing_fit,
-    style_sizing_equal,
-    style_sizing_fill,
-    style_align_start,
-    style_align_centre,
-    style_align_end,
-    style_show_always,
-    style_show_two_or_more,
-    style_show_auto_hide,
-    style_strength_auto,
-    style_strength_subtle,
-    style_strength_medium,
-    style_strength_strong,
-    style_strength_solid,
-    style_background_theme,
-    style_background_tint,
-    style_background_custom,
-    style_last,
-};
-constexpr LONG limit_cap = MAXSHORT;
-
-// Auto-hide timers (PLAN.md 5.4): the component's only timers, and only while something is due.
-constexpr UINT_PTR timer_ah_delay = 0xB701;
-constexpr UINT_PTR timer_ah_frame = 0xB702;
 
 [[nodiscard]] Bytes to_bytes(const pfc::array_t<t_uint8>& data) {
     return Bytes(data.get_ptr(), data.get_ptr() + data.get_size());
@@ -114,110 +38,19 @@ constexpr UINT_PTR timer_ah_frame = 0xB702;
     return bytes;
 }
 
-[[nodiscard]] std::wstring widen(const char* utf8) {
-    const pfc::stringcvt::string_wide_from_utf8 wide(utf8);
-    return std::wstring(wide.get_ptr());
-}
-
-[[nodiscard]] pfc::string8 narrow(const std::wstring& wide) {
-    return pfc::string8(pfc::stringcvt::string_utf8_from_wide(wide.c_str()).get_ptr());
-}
-
-//! Menu text: a lone '&' would underline the next letter.
-[[nodiscard]] std::wstring menu_text(const std::wstring& label) {
-    std::wstring out;
-    out.reserve(label.size() + 4);
-    for (const wchar_t c : label) {
-        if (c == L'&') out += L'&';
-        out += c;
-    }
-    return out;
-}
-
-[[nodiscard]] bool same_rect(const RECT& a, const RECT& b) noexcept {
-    return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
-}
-
-//! One DeferWindowPos batch that degrades to plain SetWindowPos calls if the batch fails.
-class WindowMoves {
-public:
-    void add(HWND wnd, const RECT& rc, UINT flags) noexcept {
-        if (wnd == nullptr || count_ == moves_.size()) return;
-        moves_[count_++] = Move{wnd, rc, flags | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER};
-    }
-    void apply() noexcept {
-        if (count_ == 0) return;
-        HDWP dwp = BeginDeferWindowPos(static_cast<int>(count_));
-        for (std::size_t i = 0; i < count_ && dwp != nullptr; ++i) {
-            const Move& m = moves_[i];
-            dwp = DeferWindowPos(dwp, m.wnd, nullptr, m.rc.left, m.rc.top, m.rc.right - m.rc.left,
-                                 m.rc.bottom - m.rc.top, m.flags);
-        }
-        if (dwp != nullptr && EndDeferWindowPos(dwp)) {
-            count_ = 0;
-            return;
-        }
-        for (std::size_t i = 0; i < count_; ++i) {
-            const Move& m = moves_[i];
-            SetWindowPos(m.wnd, nullptr, m.rc.left, m.rc.top, m.rc.right - m.rc.left, m.rc.bottom - m.rc.top,
-                         m.flags);
-        }
-        count_ = 0;
-    }
-
-private:
-    struct Move {
-        HWND wnd{nullptr};
-        RECT rc{};
-        UINT flags{0};
-    };
-    std::array<Move, 4> moves_{};
-    std::size_t count_{0};
-};
-
-struct Tab {
-    GUID guid{};
-    //! The child's config as last read from it (or from the layout, before it existed).
-    Bytes config;
-    TabExtra extra;
+struct CuiTab : Tab {
     //! The extension object. Exists as soon as the container does; its window only when shown.
     uie::window_ptr window;
     bool object_tried{false};
-    HWND wnd{nullptr};
-    //! The rectangle last given to wnd; a hidden child keeps a stale one until it is shown.
-    RECT applied{};
-    uie::size_limit_t limits{};
-    std::wstring label;
-    //! The compiled title when it is title formatting, and the text it was compiled from.
-    titleformat_object::ptr script;
-    std::string script_source;
-    //! Removed in the open Configure dialog: not shown, deleted when it closes with OK.
-    bool pending_removal{false};
 };
 
-//! A code point as UTF-16; empty for none or anything that is not a scalar value.
-[[nodiscard]] std::wstring icon_text(std::uint32_t cp) {
-    if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return {};
-    if (cp < 0x10000) return std::wstring(1, static_cast<wchar_t>(cp));
-    cp -= 0x10000;
-    return std::wstring{static_cast<wchar_t>(0xD800 + (cp >> 10)), static_cast<wchar_t>(0xDC00 + (cp & 0x3FF))};
-}
-
-enum class PlaybackEvent : std::uint8_t { started, stopped, title };
+[[nodiscard]] CuiTab& cui(Tab& tab) noexcept { return static_cast<CuiTab&>(tab); }
+[[nodiscard]] const CuiTab& cui(const Tab& tab) noexcept { return static_cast<const CuiTab&>(tab); }
 
 class TabsHost;
 
-class TabsContainer : public uie::container_uie_window_v3_t<uie::splitter_window_v3>,
-                      private StripListener,
-                      private HotZoneListener,
-                      private cover::Listener,
-                      private ConfigureTarget {
+class TabsContainer : public uie::container_uie_window_v3_t<uie::splitter_window_v3>, public TabsCore {
 public:
-    TabsContainer() { live_containers().push_back(this); }
-    ~TabsContainer() { std::erase(live_containers(), this); }
-    TabsContainer(const TabsContainer&) = delete;
-    TabsContainer& operator=(const TabsContainer&) = delete;
-
     // uie::extension_base / uie::window ------------------------------------------------------
 
     const GUID& get_extension_guid() const override { return guids::container; }
@@ -236,18 +69,22 @@ public:
     bool have_config_popup() const override { return true; }
     //! The Configure dialog. Also called by Columns UI's Layout page on an instance that has no
     //! window (it reads get_config afterwards).
-    bool show_config_popup(HWND parent) override;
+    bool show_config_popup(HWND parent) override { return run_configure(parent); }
 
     uie::container_window_v3_config get_window_config() override {
         // Not transparent: that would repaint the whole container on every move and resize.
         return {L"foo_bettertabs_container", false};
     }
-    LRESULT on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) override;
+    LRESULT on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) override {
+        LRESULT result = 0;
+        if (core_message(wnd, msg, wp, lp, result)) return result;
+        return DefWindowProc(wnd, msg, wp, lp);
+    }
 
     // uie::splitter_window ----------------------------------------------------------------
 
     void insert_panel(t_size index, const uie::splitter_item_t* item) override;
-    void remove_panel(t_size index) override;
+    void remove_panel(t_size index) override { remove_tab(index); }
     void replace_panel(t_size index, const uie::splitter_item_t* item) override;
     t_size get_panel_count() const override { return tabs_.size(); }
     bool get_config_item_supported(t_size index, const GUID& type) const override;
@@ -255,152 +92,54 @@ public:
     bool set_config_item(t_size index, const GUID& type, stream_reader* source, abort_callback& abort) override;
     void get_supported_panels(const pfc::list_base_const_t<uie::window::ptr>& windows,
                               bit_array_var& mask_unsupported) override;
-    void reorder_panels(const size_t* order, size_t count) override;
+    void reorder_panels(const size_t* order, size_t count) override { reorder_tabs(order, count); }
     //! Layout editing (live edit, Ctrl+Shift+right-click) walks the tree through this. Without it the
     //! container cannot be selected and its children's menus lack the container entries.
     bool is_point_ours(HWND wnd_point, const POINT& pt_screen, pfc::list_base_t<uie::window_ptr>& hierarchy) override;
 
-    // For the host and the colour/font clients ---------------------------------------------
+    // For the host -------------------------------------------------------------------------
 
-    [[nodiscard]] Tab* find_by_wnd(HWND wnd) const noexcept;
-    void on_child_limits_changed(HWND wnd) noexcept;
-    bool show_child(HWND wnd) noexcept;
+    using TabsCore::find_by_wnd;
+    using TabsCore::on_child_limits_changed;
+    using TabsCore::show_child;
     void relinquish(HWND wnd) noexcept;
     void get_children(pfc::list_base_t<uie::window_ptr>& out) const;
     [[nodiscard]] bool self_visible() const;
-    void refresh_appearance() noexcept;
-    void refresh_colours() noexcept;
-    void refresh_font() noexcept;
-    //! From the process-wide playback watch: follow playback, re-evaluate formatted titles.
-    void on_playback(PlaybackEvent event) noexcept;
-    //! Ctrl+Tab: the next (+1) or previous (-1) tab, wrapping. False when this container does
-    //! not take it (switched off, fewer than two tabs), so an outer one can.
-    bool cycle_tabs(int direction) noexcept;
+
+    HWND core_wnd() const noexcept override { return get_wnd(); }
 
 protected:
     uie::splitter_item_t* get_panel(t_size index) const override;
 
+    // TabsCore hooks
+    std::unique_ptr<Tab> host_new_tab() const override { return std::make_unique<CuiTab>(); }
+    bool host_prepare(Tab& tab) noexcept override;
+    bool host_present(const Tab& tab) const noexcept override { return cui(tab).window.is_valid(); }
+    HWND host_create_window(Tab& tab) noexcept override;
+    void host_destroy(Tab& tab) noexcept override;
+    Bytes host_child_config(const Tab& tab) const override;
+    std::wstring host_child_label(const Tab& tab) const override;
+    std::wstring host_panel_name(const Tab& tab) const override;
+    void host_limits_changed() noexcept override;
+    bool host_visible() const noexcept override;
+    HostColours host_colours() const noexcept override;
+    void host_font(StripFont& font, StripTextOptions& options) const noexcept override;
+    const wchar_t* host_ui_name() const noexcept override { return L"Columns UI"; }
+    bool host_child_menu(Tab& tab, HMENU menu, unsigned first, unsigned last) noexcept override;
+    void host_child_menu_command(unsigned id) noexcept override;
+    void host_child_menu_done() noexcept override { menu_hook_.release(); }
+    void host_tab_key(HWND from) noexcept override;
+    bool host_shortcut(WPARAM key) noexcept override;
+    service_ptr_t<service_base> host_keep_alive() noexcept override { return this; }
+    void host_on_create() noexcept override;
+    void host_on_destroy() noexcept override;
+
 private:
-    // StripListener
-    void on_strip_activate(std::size_t index) noexcept override;
-    void on_strip_step(int direction) noexcept override;
-    void on_strip_menu(std::size_t index, POINT screen) noexcept override;
-    void on_strip_overflow(POINT screen) noexcept override;
-    bool on_strip_key(UINT message, WPARAM key) noexcept override;
-    void on_strip_metrics_changed() noexcept override;
-    void on_strip_middle_click(std::size_t index) noexcept override;
-    void on_strip_reorder(std::size_t from, std::size_t to) noexcept override;
-    void on_strip_pointer() noexcept override;
-    // HotZoneListener
-    void on_hot_zone(bool inside, bool clicked) noexcept override;
-
-    // Auto-hide (PLAN.md 5.4) ------------------------------------------------------------------
-    enum class AhTimer : std::uint8_t { none, reveal, hide };
-    [[nodiscard]] bool auto_hide() const noexcept { return settings_.visibility == StripVisibility::auto_hide; }
-    //! Auto-hide drawn over the panel: chosen, and the strip really is a layered child.
-    [[nodiscard]] bool ah_overlay() const noexcept {
-        return auto_hide() && settings_.reveal_mode == RevealMode::overlay && strip_.layered();
-    }
-    //! Creates or drops the hot zone and the layered strip to match the settings.
-    void ah_update_mode() noexcept;
-    [[nodiscard]] bool ah_pointer_or_pinned() const noexcept;
-    //! Decides show/hide from the pointer and the pins; starts or cancels the delay timer.
-    void ah_evaluate() noexcept;
-    void ah_set_shown(bool shown) noexcept;
-    void ah_set_timer(AhTimer kind, unsigned ms) noexcept;
-    void ah_on_timer(UINT_PTR id) noexcept;
-    //! A tab chosen by the user: the strip shows (if hidden) and stays at least linger_ms.
-    void ah_note_switch() noexcept;
-    //! Keeps the strip and hot zone above the panels (a new panel window is created on top).
-    void ah_raise() noexcept;
-    [[nodiscard]] int ah_px(unsigned dip) const noexcept;
-
-    // ConfigureTarget
-    void preview(const ConfigureState& state) noexcept override;
-    // cover::Listener
-    void on_cover_accent_changed() noexcept override;
-    void update_cover_subscription() noexcept;
-    //! After settings_ changed at run time: clamp, push to the strip, lay out again.
-    void apply_settings() noexcept;
-    void append_style_menu(HMENU menu) const noexcept;
-    void run_style_command(unsigned command) noexcept;
-
-    void on_create(HWND wnd) noexcept;
-    void on_destroy() noexcept;
-    void on_paint(HWND wnd) noexcept;
-    void fill_background(HDC dc) const noexcept;
-
-    void load(InstanceData&& data);
-    [[nodiscard]] InstanceData snapshot(bool refresh_children) const;
     [[nodiscard]] std::unique_ptr<Tab> tab_from_item(const uie::splitter_item_t* item) const;
     [[nodiscard]] uie::window_host_ptr host_for_availability() const;
 
-    bool ensure_object(Tab& tab) noexcept;
-    bool ensure_window(Tab& tab) noexcept;
-    void destroy_tab_window(Tab& tab) noexcept;
-    void update_label(Tab& tab) noexcept;
-    //! Re-evaluates the title-formatted labels; rebuilds the strip if one changed.
-    void refresh_titles() noexcept;
-    //! The panel's own name, for the dialogs (creates a temporary object if need be).
-    [[nodiscard]] std::wstring panel_name(const Tab& tab) const;
-    [[nodiscard]] bool tab_visible(const Tab& tab) const noexcept;
-    void set_tab_hidden(Tab* tab, bool hidden) noexcept;
-    //! Moves tabs_[from] to position `to`.
-    void move_tab(std::size_t from, std::size_t to) noexcept;
-    void rename_tab(Tab* tab) noexcept;
-    //! Deletes the tabs the Configure dialog removed.
-    void commit_removals() noexcept;
-
-    void rebuild_strip() noexcept;
-    [[nodiscard]] std::size_t strip_index_of(const Tab* tab) const noexcept;
-    [[nodiscard]] std::size_t index_of(const Tab* tab) const noexcept;
-    [[nodiscard]] Tab* fallback_after_removal(std::size_t removed_index) const noexcept;
-    void activate(Tab* next, bool from_user) noexcept;
-    void ensure_active_valid() noexcept;
-
-    [[nodiscard]] bool want_strip() const noexcept;
-    void layout() noexcept;
-    [[nodiscard]] uie::size_limit_t compute_limits() const noexcept;
-    void limits_changed() noexcept;
-    static void query_limits(Tab& tab) noexcept;
-
-    void show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items, bool with_style) noexcept;
-
-    Settings settings_{};
-    std::vector<RawField> unknown_settings_;
-    std::vector<RawField> unknown_sections_;
-    std::vector<std::unique_ptr<Tab>> tabs_;
-    Tab* active_{nullptr};
-    //! The active index from the layout, used when the window is created.
-    std::uint32_t saved_active_{0};
-
     service_ptr_t<TabsHost> host_;
-    StripWindow strip_;
-    std::vector<std::size_t> visible_; // strip index -> tabs_ index
-    std::vector<StripItem> items_;
-    //! The tabs as the open Configure dialog numbers them (TabEdit::id).
-    std::vector<Tab*> config_tabs_;
-    //! Time spent creating panel windows, for the performance log.
-    double child_ms_{0.0};
-    bool strip_shown_{false};
-    RECT content_{};
-    uie::size_limit_t limits_{};
-    COLORREF background_{RGB(255, 255, 255)};
-    bool in_create_{false};
-    bool cover_subscribed_{false};
-
-    // Auto-hide state.
-    HotZone hot_zone_;
-    bool ah_shown_{false};
-    AhTimer ah_timer_{AhTimer::none};
-    //! A menu (or a dialog from it) of this strip is open.
-    bool menu_pin_{false};
-    ULONGLONG linger_until_{0};
-    //! Show/hide animation: progress 0 (hidden) to 1 (shown), heading for ah_shown_.
-    bool ah_animating_{false};
-    float ah_progress_{0.0f};
-    float ah_from_{0.0f};
-    ULONGLONG ah_anim_start_{0};
+    pfc::refcounted_object_ptr_t<uie::menu_hook_impl> menu_hook_;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -470,149 +209,7 @@ private:
 uie::window_host_factory<TabsHost> g_host_factory;
 
 // ---------------------------------------------------------------------------------------------
-// Process-wide helpers, alive while at least one container has a window: one playback callback
-// and one keyboard filter however many containers there are.
-
-void broadcast(PlaybackEvent event) noexcept {
-    // A copy: following playback creates panel windows, which could add or remove containers.
-    const std::vector<TabsContainer*> list = live_containers();
-    for (TabsContainer* container : list) {
-        if (std::find(live_containers().begin(), live_containers().end(), container) != live_containers().end()) {
-            container->on_playback(event);
-        }
-    }
-}
-
-//! Never from inside the play callback itself: following playback can create a panel, and a
-//! panel that registers its own play callback while the callbacks are being dispatched crashed
-//! foobar2000 (Artwork view, Item properties).
-void post(PlaybackEvent event) noexcept {
-    try {
-        fb2k::inMainThread([event] { broadcast(event); });
-    } catch (...) {
-    }
-}
-
-class PlaybackWatch : public play_callback_impl_base {
-public:
-    PlaybackWatch()
-        : play_callback_impl_base(flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_stop |
-                                  flag_on_playback_pause | flag_on_playback_edited |
-                                  flag_on_playback_dynamic_info_track) {}
-
-    //! Playback the user started: play, next, previous, a double-clicked track. Not the next
-    //! track of a playlist, and not the session resumed when foobar2000 starts.
-    void on_playback_starting(play_control::t_track_command command, bool) override {
-        if (command != play_control::track_command_resume) post(PlaybackEvent::started);
-    }
-    void on_playback_new_track(metadb_handle_ptr) override { post(PlaybackEvent::title); }
-    void on_playback_stop(play_control::t_stop_reason reason) override {
-        if (reason == play_control::stop_reason_starting_another) return; // a new track follows
-        // Not while foobar2000 shuts down: that would create panels only to destroy them.
-        if (reason != play_control::stop_reason_shutting_down) post(PlaybackEvent::stopped);
-    }
-    void on_playback_pause(bool) override { post(PlaybackEvent::title); }
-    void on_playback_edited(metadb_handle_ptr) override { post(PlaybackEvent::title); }
-    void on_playback_dynamic_info_track(const file_info&) override { post(PlaybackEvent::title); }
-};
-
-//! Ctrl+Tab and Ctrl+Shift+Tab anywhere inside a container. The innermost container that takes
-//! it wins, so nested containers each cycle their own tabs.
-class CtrlTabFilter : public message_filter_impl_base {
-public:
-    CtrlTabFilter() : message_filter_impl_base(WM_KEYDOWN, WM_KEYDOWN) {}
-
-    bool pretranslate_message(MSG* msg) override {
-        if (msg == nullptr || msg->message != WM_KEYDOWN || msg->wParam != VK_TAB) return false;
-        if (GetKeyState(VK_CONTROL) >= 0 || GetKeyState(VK_MENU) < 0) return false;
-        const int direction = GetKeyState(VK_SHIFT) < 0 ? -1 : 1;
-        for (HWND wnd = msg->hwnd; wnd != nullptr; wnd = GetAncestor(wnd, GA_PARENT)) {
-            for (TabsContainer* container : live_containers()) {
-                if (container->get_wnd() == wnd) {
-                    if (container->cycle_tabs(direction)) return true;
-                    break;
-                }
-            }
-            if ((GetWindowLongPtrW(wnd, GWL_STYLE) & WS_CHILD) == 0) break;
-        }
-        return false;
-    }
-};
-
-struct Shared {
-    unsigned windows{0};
-    std::unique_ptr<PlaybackWatch> playback;
-    std::unique_ptr<CtrlTabFilter> keys;
-};
-
-Shared& shared() {
-    static Shared instance;
-    return instance;
-}
-
-void attach_shared() noexcept {
-    Shared& s = shared();
-    if (s.windows++ != 0) return;
-    try {
-        s.playback = std::make_unique<PlaybackWatch>();
-        s.keys = std::make_unique<CtrlTabFilter>();
-    } catch (const std::exception& e) {
-        log::warn(std::string("could not watch playback or keys: ") + e.what());
-    }
-}
-
-void detach_shared() noexcept {
-    Shared& s = shared();
-    if (s.windows == 0 || --s.windows != 0) return;
-    s.playback.reset();
-    s.keys.reset();
-}
-
-// ---------------------------------------------------------------------------------------------
 // Configuration.
-
-void TabsContainer::load(InstanceData&& data) {
-    settings_ = data.settings;
-    unknown_settings_ = std::move(data.unknown_settings);
-    unknown_sections_ = std::move(data.unknown_sections);
-    saved_active_ = data.active;
-    tabs_.clear();
-    tabs_.reserve(data.children.size());
-    for (ChildRecord& child : data.children) {
-        auto tab = std::make_unique<Tab>();
-        tab->guid = child.guid;
-        tab->config = std::move(child.config);
-        tab->extra = decode_tab_extra(child.extra);
-        tabs_.push_back(std::move(tab));
-    }
-}
-
-InstanceData TabsContainer::snapshot(bool refresh_children) const {
-    InstanceData data;
-    data.settings = settings_;
-    data.unknown_settings = unknown_settings_;
-    data.unknown_sections = unknown_sections_;
-    const std::size_t active = index_of(active_);
-    data.active = active != no_index ? static_cast<std::uint32_t>(active) : saved_active_;
-    data.children.reserve(tabs_.size());
-    for (const auto& tab : tabs_) {
-        ChildRecord child;
-        child.guid = tab->guid;
-        child.config = tab->config;
-        if (refresh_children && tab->wnd != nullptr && tab->window.is_valid()) {
-            try {
-                pfc::array_t<t_uint8> live;
-                tab->window->get_config_to_array(live, fb2k::noAbort, true);
-                child.config = to_bytes(live);
-            } catch (const std::exception& e) {
-                log::warn(std::string("could not read a panel's settings: ") + e.what());
-            }
-        }
-        child.extra = encode_tab_extra(tab->extra);
-        data.children.push_back(std::move(child));
-    }
-    return data;
-}
 
 void TabsContainer::set_config(stream_reader* reader, t_size size, abort_callback& abort) {
     InstanceData data;
@@ -623,22 +220,7 @@ void TabsContainer::set_config(stream_reader* reader, t_size size, abort_callbac
         log::warn(std::string("could not read settings, using defaults: ") + e.what());
         data = InstanceData{};
     }
-    const bool live = get_wnd() != nullptr;
-    if (live) {
-        for (auto& tab : tabs_) destroy_tab_window(*tab);
-        active_ = nullptr;
-    }
-    load(std::move(data));
-    if (live) {
-        for (auto& tab : tabs_) ensure_object(*tab);
-        strip_.set_settings(settings_);
-        update_cover_subscription();
-        refresh_colours();
-        rebuild_strip();
-        ensure_active_valid();
-        layout();
-        limits_changed();
-    }
+    reload(std::move(data));
 }
 
 void TabsContainer::get_config(stream_writer* writer, abort_callback& abort) const {
@@ -649,7 +231,7 @@ void TabsContainer::get_config(stream_writer* writer, abort_callback& abort) con
 void TabsContainer::export_config(stream_writer* writer, abort_callback& abort) const {
     InstanceData data = snapshot(true);
     for (std::size_t i = 0; i < tabs_.size(); ++i) {
-        uie::window_ptr child = tabs_[i]->window;
+        uie::window_ptr child = cui(*tabs_[i]).window;
         if (!child.is_valid()) {
             // Tab stack does the same: an FCL that silently dropped a panel would be worse.
             if (!uie::window::create_by_guid(tabs_[i]->guid, child)) throw cui::fcl::exception_missing_panel();
@@ -665,6 +247,7 @@ void TabsContainer::export_config(stream_writer* writer, abort_callback& abort) 
     const Bytes bytes = encode_instance(data);
     writer->write(bytes.data(), bytes.size(), abort);
 }
+
 
 void TabsContainer::import_config(stream_reader* reader, t_size size, abort_callback& abort) {
     InstanceData data = decode_instance(read_all(reader, size, abort));
@@ -687,7 +270,7 @@ void TabsContainer::import_config(stream_reader* reader, t_size size, abort_call
     }
     load(std::move(data));
     for (std::size_t i = 0; i < tabs_.size() && i < objects.size(); ++i) {
-        if (objects[i].is_valid()) tabs_[i]->window = objects[i];
+        if (objects[i].is_valid()) cui(*tabs_[i]).window = objects[i];
     }
 }
 
@@ -700,7 +283,8 @@ uie::window_host_ptr TabsContainer::host_for_availability() const {
     return fb2k::service_new<TabsHost>();
 }
 
-bool TabsContainer::ensure_object(Tab& tab) noexcept {
+bool TabsContainer::host_prepare(Tab& base) noexcept {
+    CuiTab& tab = cui(base);
     if (tab.window.is_valid()) return true;
     if (tab.object_tried) return false;
     tab.object_tried = true;
@@ -723,44 +307,20 @@ bool TabsContainer::ensure_object(Tab& tab) noexcept {
     }
 }
 
-void TabsContainer::query_limits(Tab& tab) noexcept {
-    MINMAXINFO mmi{};
-    mmi.ptMaxTrackSize.x = MAXLONG;
-    mmi.ptMaxTrackSize.y = MAXLONG;
-    SendMessageW(tab.wnd, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&mmi));
-    tab.limits.min_width = static_cast<unsigned>(std::clamp(mmi.ptMinTrackSize.x, 0L, limit_cap));
-    tab.limits.min_height = static_cast<unsigned>(std::clamp(mmi.ptMinTrackSize.y, 0L, limit_cap));
-    tab.limits.max_width = static_cast<unsigned>(std::clamp(mmi.ptMaxTrackSize.x, 0L, limit_cap));
-    tab.limits.max_height = static_cast<unsigned>(std::clamp(mmi.ptMaxTrackSize.y, 0L, limit_cap));
-}
-
-bool TabsContainer::ensure_window(Tab& tab) noexcept {
-    if (tab.wnd != nullptr) return true;
-    const HWND self = get_wnd();
-    if (self == nullptr || !ensure_object(tab)) return false;
-    const std::uint64_t t_start = perf::enabled() ? perf::now() : 0;
+HWND TabsContainer::host_create_window(Tab& base) noexcept {
+    CuiTab& tab = cui(base);
+    if (!tab.window.is_valid()) return nullptr;
     try {
         const ui_helpers::window_position_t position(content_);
-        const HWND wnd = tab.window->create_or_transfer_window(self, host_, position);
-        if (t_start != 0) child_ms_ += perf::elapsed_ms(t_start, perf::now());
-        if (wnd == nullptr) return false;
-        if ((GetWindowLongPtrW(wnd, GWL_STYLE) & WS_VISIBLE) != 0) {
-            // Same repair as Tab stack; a panel should be created hidden.
-            ShowWindow(wnd, SW_HIDE);
-        }
-        SetWindowLongPtrW(wnd, GWL_STYLE, GetWindowLongPtrW(wnd, GWL_STYLE) | WS_CLIPSIBLINGS);
-        tab.wnd = wnd;
-        tab.applied = content_;
-        query_limits(tab);
-        update_label(tab);
-        return true;
+        return tab.window->create_or_transfer_window(get_wnd(), host_, position);
     } catch (const std::exception& e) {
         log::warn(std::string("could not create a panel window: ") + e.what());
-        return false;
+        return nullptr;
     }
 }
 
-void TabsContainer::destroy_tab_window(Tab& tab) noexcept {
+void TabsContainer::host_destroy(Tab& base) noexcept {
+    CuiTab& tab = cui(base);
     if (tab.wnd != nullptr && tab.window.is_valid()) {
         try {
             pfc::array_t<t_uint8> live;
@@ -773,60 +333,30 @@ void TabsContainer::destroy_tab_window(Tab& tab) noexcept {
         } catch (...) {
         }
     }
-    tab.wnd = nullptr;
     tab.window.release();
     tab.object_tried = false;
-    tab.applied = RECT{};
 }
 
-void TabsContainer::update_label(Tab& tab) noexcept {
-    try {
-        if (tab.extra.use_custom_title && !tab.extra.title.empty()) {
-            if (!tab.extra.title_is_format) {
-                tab.script.release();
-                tab.label = widen(tab.extra.title.c_str());
-                return;
-            }
-            if (!tab.script.is_valid() || tab.script_source != tab.extra.title) {
-                tab.script.release();
-                titleformat_compiler::get()->compile_safe_ex(tab.script, tab.extra.title.c_str(), "(invalid title)");
-                tab.script_source = tab.extra.title;
-            }
-            pfc::string8 text;
-            // The playing track while there is one; otherwise the script runs without a track
-            // (fields read as "?", so $if() and the like can show something else).
-            if (!playback_control::get()->playback_format_title(nullptr, text, tab.script, nullptr,
-                                                                playback_control::display_level_all)) {
-                tab.script->run(nullptr, text, nullptr);
-            }
-            tab.label = widen(text.get_ptr());
-            return;
-        }
-        tab.script.release();
-        pfc::string8 name;
-        if (tab.window.is_valid()) {
-            if (!tab.window->get_short_name(name)) tab.window->get_name(name);
-        }
-        tab.label = widen(name.get_ptr());
-    } catch (...) {
-        tab.label.clear();
+Bytes TabsContainer::host_child_config(const Tab& base) const {
+    const CuiTab& tab = cui(base);
+    if (tab.wnd == nullptr || !tab.window.is_valid()) return tab.config;
+    pfc::array_t<t_uint8> live;
+    tab.window->get_config_to_array(live, fb2k::noAbort, true);
+    return to_bytes(live);
+}
+
+std::wstring TabsContainer::host_child_label(const Tab& base) const {
+    const CuiTab& tab = cui(base);
+    pfc::string8 name;
+    if (tab.window.is_valid()) {
+        if (!tab.window->get_short_name(name)) tab.window->get_name(name);
     }
+    return widen(name.get_ptr());
 }
 
-void TabsContainer::refresh_titles() noexcept {
-    bool changed = false;
-    for (auto& tab : tabs_) {
-        if (!tab->script.is_valid()) continue;
-        const std::wstring before = tab->label;
-        update_label(*tab);
-        changed = changed || tab->label != before;
-    }
-    if (changed && get_wnd() != nullptr) rebuild_strip();
-}
-
-std::wstring TabsContainer::panel_name(const Tab& tab) const {
+std::wstring TabsContainer::host_panel_name(const Tab& tab) const {
     try {
-        uie::window_ptr object = tab.window;
+        uie::window_ptr object = cui(tab).window;
         if (!object.is_valid() && !uie::window::create_by_guid(tab.guid, object)) return L"(missing panel)";
         pfc::string8 name;
         object->get_name(name);
@@ -836,439 +366,7 @@ std::wstring TabsContainer::panel_name(const Tab& tab) const {
     }
 }
 
-bool TabsContainer::tab_visible(const Tab& tab) const noexcept {
-    return !tab.extra.hidden && !tab.pending_removal && tab.window.is_valid();
-}
-
-Tab* TabsContainer::find_by_wnd(HWND wnd) const noexcept {
-    if (wnd == nullptr) return nullptr;
-    for (const auto& tab : tabs_) {
-        if (tab->wnd == wnd) return tab.get();
-    }
-    return nullptr;
-}
-
-std::size_t TabsContainer::index_of(const Tab* tab) const noexcept {
-    if (tab == nullptr) return no_index;
-    for (std::size_t i = 0; i < tabs_.size(); ++i) {
-        if (tabs_[i].get() == tab) return i;
-    }
-    return no_index;
-}
-
-std::size_t TabsContainer::strip_index_of(const Tab* tab) const noexcept {
-    const std::size_t index = index_of(tab);
-    if (index == no_index) return no_index;
-    for (std::size_t s = 0; s < visible_.size(); ++s) {
-        if (visible_[s] == index) return s;
-    }
-    return no_index;
-}
-
-void TabsContainer::get_children(pfc::list_base_t<uie::window_ptr>& out) const {
-    for (const auto& tab : tabs_) {
-        if (tab->window.is_valid()) out.add_item(tab->window);
-    }
-}
-
-bool TabsContainer::self_visible() const {
-    const HWND self = get_wnd();
-    if (self == nullptr) return false;
-    const auto& parent = get_host();
-    return parent.is_valid() ? parent->is_visible(self) : IsWindowVisible(self) != FALSE;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Tabs and switching.
-
-void TabsContainer::rebuild_strip() noexcept {
-    try {
-        visible_.clear();
-        items_.clear();
-        for (std::size_t i = 0; i < tabs_.size(); ++i) {
-            const Tab& tab = *tabs_[i];
-            if (!tab_visible(tab)) continue;
-            visible_.push_back(i);
-            StripItem item;
-            item.icon = icon_text(tab.extra.icon);
-            if (!item.icon.empty()) item.icon_font = widen(tab.extra.icon_font.c_str());
-            if (!settings_.icons_only || item.icon.empty()) item.label = tab.label;
-            item.tooltip = tab.label;
-            items_.push_back(std::move(item));
-        }
-    } catch (...) {
-        visible_.clear();
-        items_.clear();
-    }
-    strip_.set_items(items_, strip_index_of(active_));
-}
-
-void TabsContainer::set_tab_hidden(Tab* tab, bool hidden) noexcept {
-    const std::size_t index = index_of(tab);
-    if (index == no_index || tab->extra.hidden == hidden) return;
-    // The last tab stays: an empty container could only be repaired from the layout.
-    if (hidden && tab_visible(*tab) && visible_.size() < 2) return;
-    tab->extra.hidden = hidden;
-    if (get_wnd() == nullptr) return;
-    rebuild_strip();
-    if (hidden && tab == active_) {
-        activate(fallback_after_removal(index), false);
-    } else if (!hidden) {
-        ensure_object(*tab);
-        rebuild_strip();
-        activate(tab, true);
-    }
-    ensure_active_valid();
-    layout();
-    limits_changed();
-}
-
-void TabsContainer::move_tab(std::size_t from, std::size_t to) noexcept {
-    if (from >= tabs_.size() || to >= tabs_.size() || from == to) return;
-    std::unique_ptr<Tab> tab = std::move(tabs_[from]);
-    tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(from));
-    tabs_.insert(tabs_.begin() + static_cast<std::ptrdiff_t>(to), std::move(tab));
-    if (get_wnd() != nullptr) rebuild_strip();
-}
-
-void TabsContainer::rename_tab(Tab* tab) noexcept {
-    if (index_of(tab) == no_index) return;
-    const service_ptr_t<TabsContainer> keep_alive(this);
-    try {
-        TabExtra extra = tab->extra;
-        if (!run_rename_dialog(get_wnd(), panel_name(*tab), extra)) return;
-        if (index_of(tab) == no_index) return; // the layout changed meanwhile
-        tab->extra = extra;
-        update_label(*tab);
-        rebuild_strip();
-    } catch (const std::exception& e) {
-        log::warn(std::string("rename failed: ") + e.what());
-    }
-}
-
-void TabsContainer::on_playback(PlaybackEvent event) noexcept {
-    if (get_wnd() == nullptr) return;
-    if (event != PlaybackEvent::title) {
-        for (const auto& tab : tabs_) {
-            const bool wanted = event == PlaybackEvent::started ? tab->extra.show_on_play : tab->extra.show_on_stop;
-            if (wanted && tab_visible(*tab)) {
-                activate(tab.get(), false);
-                break;
-            }
-        }
-    }
-    refresh_titles();
-}
-
-bool TabsContainer::cycle_tabs(int direction) noexcept {
-    if (!settings_.ctrl_tab || visible_.size() < 2) return false;
-    const std::size_t count = visible_.size();
-    const std::size_t current = strip_index_of(active_);
-    std::size_t next = 0;
-    if (current != no_index) next = direction > 0 ? (current + 1) % count : (current + count - 1) % count;
-    activate(tabs_[visible_[next]].get(), true);
-    return true;
-}
-
-Tab* TabsContainer::fallback_after_removal(std::size_t removed_index) const noexcept {
-    // The next visible tab, else the previous one (Tab stack picks the neighbour the same way).
-    for (std::size_t i = removed_index; i < tabs_.size(); ++i) {
-        if (tab_visible(*tabs_[i])) return tabs_[i].get();
-    }
-    for (std::size_t i = (std::min)(removed_index, tabs_.size()); i > 0; --i) {
-        if (tab_visible(*tabs_[i - 1])) return tabs_[i - 1].get();
-    }
-    return nullptr;
-}
-
-void TabsContainer::ensure_active_valid() noexcept {
-    if (active_ != nullptr && index_of(active_) == no_index) active_ = nullptr; // defensive
-    if (active_ != nullptr && tab_visible(*active_)) return;
-    Tab* next = nullptr;
-    if (settings_.remember_active && saved_active_ < tabs_.size() && tab_visible(*tabs_[saved_active_])) {
-        next = tabs_[saved_active_].get();
-    } else {
-        next = fallback_after_removal(0);
-    }
-    // activate() also hides the old one when it was just hidden as a tab.
-    activate(next, false);
-}
-
-void TabsContainer::activate(Tab* next, bool from_user) noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr) {
-        active_ = next;
-        return;
-    }
-    if (next != nullptr && !tab_visible(*next)) next = nullptr;
-    Tab* const old = active_;
-    if (next == old && (next == nullptr || next->wnd != nullptr)) return;
-
-    const bool measure = perf::enabled();
-    const std::uint64_t t_start = measure ? perf::now() : 0;
-
-    const HWND focus = GetFocus();
-    const bool focus_in_old = old != nullptr && old->wnd != nullptr && focus != nullptr &&
-                              (focus == old->wnd || IsChild(old->wnd, focus));
-
-    const bool created = next != nullptr && next->wnd == nullptr;
-    if (next != nullptr) ensure_window(*next);
-    const std::uint64_t t_created = measure ? perf::now() : 0;
-
-    const bool setredraw = perf::use_setredraw() && !in_create_;
-    if (setredraw) SendMessageW(self, WM_SETREDRAW, FALSE, 0);
-
-    WindowMoves moves;
-    if (next != nullptr && next->wnd != nullptr) {
-        // Show first, then hide: the parent's background is never exposed in between.
-        UINT flags = SWP_SHOWWINDOW;
-        if (same_rect(next->applied, content_)) flags |= SWP_NOMOVE | SWP_NOSIZE;
-        next->applied = content_;
-        moves.add(next->wnd, content_, flags);
-    }
-    if (old != nullptr && old != next && old->wnd != nullptr) {
-        moves.add(old->wnd, old->applied, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
-    }
-    active_ = next;
-    moves.apply();
-
-    if (setredraw) {
-        SendMessageW(self, WM_SETREDRAW, TRUE, 0);
-        RedrawWindow(self, &content_, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
-    }
-    strip_.set_active(strip_index_of(next));
-    // A newly created panel window starts on top of the z-order, above the auto-hide windows.
-    if (created && auto_hide()) ah_raise();
-
-    if (created) limits_changed();
-
-    if (next != nullptr && next->wnd != nullptr && (focus_in_old || (from_user && focus == self))) {
-        HWND target = next->wnd;
-        if ((GetWindowLongPtrW(target, GWL_STYLE) & WS_TABSTOP) == 0) {
-            target = GetNextDlgTabItem(next->wnd, next->wnd, FALSE);
-        }
-        const bool ok = target != nullptr && (target == next->wnd || IsChild(next->wnd, target)) &&
-                        (GetWindowLongPtrW(target, GWL_STYLE) & WS_TABSTOP) != 0;
-        // A hidden auto-hide strip must not take the focus: it would pin itself shown.
-        SetFocus(ok ? target : (auto_hide() && !ah_shown_ ? next->wnd : strip_.hwnd()));
-    }
-    if (from_user) ah_note_switch();
-
-    if (measure && next != nullptr && next->wnd != nullptr && !in_create_) {
-        const std::uint64_t t_switched = perf::now();
-        // Force the first paint now so it can be timed; with logging off it happens as usual.
-        UpdateWindow(next->wnd);
-        const std::uint64_t t_painted = perf::now();
-        perf::PaintStats strip_stats;
-        strip_.take_paint_stats(strip_stats);
-        pfc::string_formatter f;
-        f << "switch to \"" << narrow(next->label) << "\" (" << pfc::format_uint(tabs_.size()) << " tabs): "
-          << pfc::format_float(perf::elapsed_ms(t_start, t_switched), 0, 3) << " ms";
-        if (created) f << " incl. create " << pfc::format_float(perf::elapsed_ms(t_start, t_created), 0, 3) << " ms";
-        f << ", to first paint " << pfc::format_float(perf::elapsed_ms(t_start, t_painted), 0, 3) << " ms";
-        if (strip_stats.paints != 0) {
-            f << "; strip: " << pfc::format_uint(strip_stats.paints) << " paints, worst "
-              << pfc::format_float(strip_stats.worst_ms, 0, 3) << " ms, " << pfc::format_uint(strip_stats.pixels)
-              << " px, " << pfc::format_uint(strip_stats.allocating_paints) << " allocating";
-        }
-        if (setredraw) f << " [WM_SETREDRAW]";
-        log::info(f.get_ptr());
-    }
-}
-
-bool TabsContainer::show_child(HWND wnd) noexcept {
-    Tab* tab = find_by_wnd(wnd);
-    if (tab == nullptr || !tab_visible(*tab)) return false;
-    activate(tab, false);
-    return active_ == tab;
-}
-
-void TabsContainer::relinquish(HWND wnd) noexcept {
-    // The child moved to another host: forget it without destroying it.
-    Tab* tab = find_by_wnd(wnd);
-    if (tab == nullptr) return;
-    const std::size_t index = index_of(tab);
-    const bool was_active = tab == active_;
-    if (was_active) active_ = nullptr;
-    tab->wnd = nullptr;
-    tab->window.release();
-    tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
-    rebuild_strip();
-    if (was_active) activate(fallback_after_removal(index), false);
-    layout();
-    limits_changed();
-}
-
-// ---------------------------------------------------------------------------------------------
-// Layout and size limits.
-
-bool TabsContainer::want_strip() const noexcept {
-    switch (settings_.visibility) {
-    case StripVisibility::never: return false;
-    case StripVisibility::two_or_more: return visible_.size() >= 2;
-    case StripVisibility::auto_hide: return ah_shown_ || ah_animating_;
-    case StripVisibility::always:
-    default: return true;
-    }
-}
-
-void TabsContainer::layout() noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr) return;
-    RECT client{};
-    GetClientRect(self, &client);
-    const bool show = want_strip() && strip_.hwnd() != nullptr;
-    const bool ah = auto_hide() && strip_.hwnd() != nullptr;
-    RECT strip_rc{};
-    content_ = client;
-    if (show || ah) {
-        const bool across_height =
-            settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
-        const int room = across_height ? client.bottom : client.right;
-        const int t = (std::min)(strip_.thickness(), (std::max)(0, room));
-        switch (settings_.position) {
-        case StripPosition::top:
-            strip_rc = RECT{0, 0, client.right, t};
-            content_.top = t;
-            break;
-        case StripPosition::bottom:
-            strip_rc = RECT{0, client.bottom - t, client.right, client.bottom};
-            content_.bottom = client.bottom - t;
-            break;
-        case StripPosition::left:
-            strip_rc = RECT{0, 0, t, client.bottom};
-            content_.left = t;
-            break;
-        case StripPosition::right:
-            strip_rc = RECT{client.right - t, 0, client.right, client.bottom};
-            content_.right = client.right - t;
-            break;
-        }
-    }
-
-    // Auto-hide: over the panel the content keeps the whole client area and the strip slides or
-    // fades as a layered child; pushing shrinks the content only while the strip is shown. The
-    // hot zone lies along the edge while the strip is hidden, over the panel when it is layered,
-    // else in room taken from the panel.
-    RECT hot_rc{};
-    bool hot_show = false;
-    if (ah) {
-        const bool overlay = ah_overlay();
-        const int hz = (std::max)(1, ah_px(settings_.hot_zone));
-        switch (settings_.position) {
-        case StripPosition::top: hot_rc = RECT{0, 0, client.right, hz}; break;
-        case StripPosition::bottom: hot_rc = RECT{0, client.bottom - hz, client.right, client.bottom}; break;
-        case StripPosition::left: hot_rc = RECT{0, 0, hz, client.bottom}; break;
-        case StripPosition::right: hot_rc = RECT{client.right - hz, 0, client.right, client.bottom}; break;
-        }
-        hot_show = hot_zone_.hwnd() != nullptr && !show;
-        if (overlay || !ah_shown_) content_ = client;
-        if (hot_show && !hot_zone_.layered()) {
-            switch (settings_.position) {
-            case StripPosition::top: content_.top = hot_rc.bottom; break;
-            case StripPosition::bottom: content_.bottom = hot_rc.top; break;
-            case StripPosition::left: content_.left = hot_rc.right; break;
-            case StripPosition::right: content_.right = hot_rc.left; break;
-            }
-        }
-        if (overlay && show && ah_animating_) {
-            const float p = ah_progress_;
-            if (settings_.show_hide_animation == ShowHideAnimation::slide) {
-                const bool across_height =
-                    settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
-                const int t = across_height ? strip_rc.bottom - strip_rc.top : strip_rc.right - strip_rc.left;
-                const int off = static_cast<int>(std::lround((1.0f - p) * static_cast<float>(t)));
-                switch (settings_.position) {
-                case StripPosition::top: OffsetRect(&strip_rc, 0, -off); break;
-                case StripPosition::bottom: OffsetRect(&strip_rc, 0, off); break;
-                case StripPosition::left: OffsetRect(&strip_rc, -off, 0); break;
-                case StripPosition::right: OffsetRect(&strip_rc, off, 0); break;
-                }
-            } else {
-                strip_.set_alpha(static_cast<BYTE>(std::lround(255.0f * std::clamp(p, 0.0f, 1.0f))));
-            }
-        } else if (strip_.layered()) {
-            strip_.set_alpha(255);
-        }
-    }
-
-    const bool strip_was_shown = strip_.hwnd() != nullptr && IsWindowVisible(strip_.hwnd());
-    WindowMoves moves;
-    if (strip_.hwnd() != nullptr) {
-        if (show) {
-            moves.add(strip_.hwnd(), strip_rc, SWP_SHOWWINDOW);
-        } else if (strip_was_shown) {
-            strip_.forget_pointer();
-            moves.add(strip_.hwnd(), strip_rc, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
-        }
-    }
-    if (hot_zone_.hwnd() != nullptr) {
-        if (hot_show) {
-            moves.add(hot_zone_.hwnd(), hot_rc, SWP_SHOWWINDOW);
-        } else if (IsWindowVisible(hot_zone_.hwnd())) {
-            hot_zone_.forget_pointer();
-            moves.add(hot_zone_.hwnd(), hot_rc, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
-        }
-    }
-    if (active_ != nullptr && active_->wnd != nullptr && !same_rect(active_->applied, content_)) {
-        active_->applied = content_;
-        moves.add(active_->wnd, content_, 0);
-    }
-    moves.apply();
-    if (ah) ah_raise();
-
-    if (ah && strip_was_shown && !show && perf::enabled() && active_ != nullptr && active_->wnd != nullptr) {
-        // PLAN.md 5.4: hiding over the panel must not make the panel repaint. Measured here.
-        RECT dirty{};
-        const bool invalidated = GetUpdateRect(active_->wnd, &dirty, FALSE) != FALSE;
-        pfc::string_formatter f;
-        f << "auto-hide: strip hidden (" << (ah_overlay() ? "over the panel" : "push") << "), panel "
-          << (invalidated ? "invalidated" : "not invalidated");
-        log::info(f.get_ptr());
-    }
-
-    if (show != strip_shown_) {
-        strip_shown_ = show;
-        limits_changed();
-    }
-}
-
-uie::size_limit_t TabsContainer::compute_limits() const noexcept {
-    uie::size_limit_t out;
-    out.min_width = 0;
-    out.min_height = 0;
-    out.max_width = limit_cap;
-    out.max_height = limit_cap;
-    for (const auto& tab : tabs_) {
-        if (tab->wnd == nullptr) continue;
-        out.min_width = (std::max)(out.min_width, tab->limits.min_width);
-        out.min_height = (std::max)(out.min_height, tab->limits.min_height);
-        out.max_width = (std::min)(out.max_width, tab->limits.max_width);
-        out.max_height = (std::min)(out.max_height, tab->limits.max_height);
-    }
-    out.max_width = (std::max)(out.max_width, out.min_width);
-    out.max_height = (std::max)(out.max_height, out.min_height);
-    // An auto-hidden strip never counts: showing it must not resize the layout around us.
-    if (strip_shown_ && !auto_hide()) {
-        const auto t = static_cast<unsigned>((std::max)(0, strip_.thickness()));
-        const bool vertical_stack =
-            settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
-        unsigned& min_along = vertical_stack ? out.min_height : out.min_width;
-        unsigned& max_along = vertical_stack ? out.max_height : out.max_width;
-        min_along = (std::min)(min_along + t, static_cast<unsigned>(limit_cap));
-        if (max_along < static_cast<unsigned>(limit_cap)) {
-            max_along = (std::min)(max_along + t, static_cast<unsigned>(limit_cap));
-        }
-    }
-    return out;
-}
-
-void TabsContainer::limits_changed() noexcept {
-    const uie::size_limit_t next = compute_limits();
-    const bool same = next.min_width == limits_.min_width && next.min_height == limits_.min_height &&
-                      next.max_width == limits_.max_width && next.max_height == limits_.max_height;
-    limits_ = next;
-    if (same || in_create_) return;
+void TabsContainer::host_limits_changed() noexcept {
     const HWND self = get_wnd();
     const auto& parent = get_host();
     if (self == nullptr || !parent.is_valid()) return;
@@ -1278,269 +376,31 @@ void TabsContainer::limits_changed() noexcept {
     }
 }
 
-void TabsContainer::on_child_limits_changed(HWND wnd) noexcept {
-    Tab* tab = find_by_wnd(wnd);
-    if (tab == nullptr) return;
-    query_limits(*tab);
-    limits_changed();
-    layout();
-}
-
-// ---------------------------------------------------------------------------------------------
-// Window.
-
-LRESULT TabsContainer::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
+bool TabsContainer::host_visible() const noexcept {
     try {
-        switch (msg) {
-        case WM_CREATE: on_create(wnd); return 0;
-        case WM_DESTROY: on_destroy(); return 0;
-        case WM_SIZE: layout(); return 0;
-        case WM_GETMINMAXINFO: {
-            auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
-            mmi->ptMinTrackSize.x = static_cast<LONG>(limits_.min_width);
-            mmi->ptMinTrackSize.y = static_cast<LONG>(limits_.min_height);
-            mmi->ptMaxTrackSize.x = static_cast<LONG>(limits_.max_width);
-            mmi->ptMaxTrackSize.y = static_cast<LONG>(limits_.max_height);
-            return 0;
-        }
-        // Transparent children (Columns UI splitters, toolbars, many panels) paint their
-        // background by forwarding these to us with their own DC and origin, so both must really
-        // paint: an empty Row/Column splitter would otherwise keep whatever was on screen before.
-        // Our own erase only reaches the area no child covers (WS_CLIPCHILDREN).
-        case WM_ERASEBKGND: fill_background(reinterpret_cast<HDC>(wp)); return 1;
-        case WM_PRINTCLIENT:
-            if ((lp & PRF_ERASEBKGND) != 0) fill_background(reinterpret_cast<HDC>(wp));
-            return 0;
-        case WM_PAINT: on_paint(wnd); return 0;
-        case WM_TIMER:
-            if (wp == timer_ah_delay || wp == timer_ah_frame) {
-                ah_on_timer(wp);
-                return 0;
-            }
-            break;
-        case WM_SETFOCUS:
-            if (active_ != nullptr && active_->wnd != nullptr) {
-                SetFocus(active_->wnd);
-            } else if (strip_.hwnd() != nullptr && strip_shown_) {
-                SetFocus(strip_.hwnd());
-            }
-            return 0;
-        default: break;
-        }
-    } catch (const std::exception& e) {
-        log::warn(std::string("container message failed: ") + e.what());
+        return self_visible();
     } catch (...) {
-        log::warn("container message failed");
-    }
-    return DefWindowProc(wnd, msg, wp, lp);
-}
-
-void TabsContainer::on_create(HWND wnd) noexcept {
-    const bool measure = perf::enabled();
-    const std::uint64_t t_start = measure ? perf::now() : 0;
-    in_create_ = true;
-    child_ms_ = 0.0;
-    // Per-step timings for the log line (startup investigation, 0.3.1). Panel creation inside a
-    // step is excluded from it, so each number is this component's own time.
-    constexpr std::size_t step_count = 8;
-    static constexpr const char* step_names[step_count] = {"shared", "strip", "cover",  "colours",
-                                                           "font",   "objects", "layout", "activate"};
-    double steps[step_count]{};
-    std::uint64_t t_step = t_start;
-    double child_before = 0.0;
-    const auto step = [&](std::size_t index) {
-        if (!measure) return;
-        const std::uint64_t t = perf::now();
-        steps[index] = (std::max)(0.0, perf::elapsed_ms(t_step, t) - (child_ms_ - child_before));
-        child_before = child_ms_;
-        t_step = t;
-    };
-    attach_shared();
-    step(0);
-    try {
-        host_ = fb2k::service_new<TabsHost>(this);
-        if (!strip_.create(wnd, *this)) log::warn("could not create the tab strip");
-        strip_.set_settings(settings_);
-        step(1);
-        update_cover_subscription();
-        step(2);
-        refresh_colours();
-        step(3);
-        refresh_font();
-        ah_update_mode();
-        step(4);
-        GetClientRect(wnd, &content_);
-        for (auto& tab : tabs_) ensure_object(*tab);
-        step(5);
-        rebuild_strip();
-        layout();
-        step(6);
-        if (!settings_.lazy_children) {
-            for (auto& tab : tabs_) {
-                if (tab_visible(*tab)) ensure_window(*tab);
-            }
-        }
-        ensure_active_valid();
-        layout();
-        step(7);
-    } catch (const std::exception& e) {
-        log::warn(std::string("could not set up the container: ") + e.what());
-    }
-    in_create_ = false;
-    limits_ = compute_limits();
-
-    if (measure) {
-        std::size_t created = 0;
-        for (const auto& tab : tabs_) created += tab->wnd != nullptr ? 1 : 0;
-        const double total = perf::elapsed_ms(t_start, perf::now());
-        pfc::string_formatter f;
-        f << "container created with " << pfc::format_uint(tabs_.size()) << " tabs (" << pfc::format_uint(created)
-          << " panel windows) in " << pfc::format_float(total, 0, 3) << " ms: own "
-          << pfc::format_float((std::max)(0.0, total - child_ms_), 0, 3) << " ms, panels "
-          << pfc::format_float(child_ms_, 0, 3) << " ms (";
-        for (std::size_t i = 0; i < step_count; ++i) {
-            if (i != 0) f << ", ";
-            f << step_names[i] << " " << pfc::format_float(steps[i], 0, 3);
-            if (i == 1) {
-                const StripWindow::CreateTimings& st = strip_.create_timings();
-                f << " [class " << pfc::format_float(st.class_ms, 0, 3) << ", window "
-                  << pfc::format_float(st.window_ms, 0, 3) << " (to WM_NCCREATE "
-                  << pfc::format_float(st.to_nccreate_ms, 0, 3) << ", to WM_CREATE "
-                  << pfc::format_float(st.to_create_ms, 0, 3) << ", after "
-                  << pfc::format_float(st.after_create_ms, 0, 3) << "), state "
-                  << pfc::format_float(st.state_ms, 0, 3) << ", text " << pfc::format_float(st.text_ms, 0, 3) << "]";
-            }
-        }
-        char warm[32]{};
-        gfx::warm_text_status(warm, sizeof(warm));
-        f << "; text warm-up " << warm << ")";
-        log::info(f.get_ptr());
+        return false;
     }
 }
 
-void TabsContainer::on_destroy() noexcept {
-    const std::size_t active = index_of(active_);
-    if (active != no_index) saved_active_ = static_cast<std::uint32_t>(active);
-    for (auto& tab : tabs_) destroy_tab_window(*tab);
-    active_ = nullptr;
-    KillTimer(get_wnd(), timer_ah_delay);
-    KillTimer(get_wnd(), timer_ah_frame);
-    ah_timer_ = AhTimer::none;
-    ah_animating_ = false;
-    ah_shown_ = false;
-    ah_progress_ = 0.0f;
-    menu_pin_ = false;
-    hot_zone_.destroy();
-    strip_.destroy();
-    strip_shown_ = false;
-    if (cover_subscribed_) {
-        cover::unsubscribe(this);
-        cover_subscribed_ = false;
-    }
-    visible_.clear();
-    if (host_.is_valid()) host_->detach();
-    host_.release();
-    detach_shared();
-}
-
-void TabsContainer::on_paint(HWND wnd) noexcept {
-    // Only reached where no child covers the client area (WS_CLIPCHILDREN), e.g. with no tabs.
-    PAINTSTRUCT ps{};
-    const HDC dc = BeginPaint(wnd, &ps);
-    if (dc != nullptr) fill_background(dc);
-    EndPaint(wnd, &ps);
-}
-
-void TabsContainer::fill_background(HDC dc) const noexcept {
-    if (dc == nullptr) return;
-    RECT clip{};
-    if (GetClipBox(dc, &clip) == ERROR || IsRectEmpty(&clip)) return;
-    // The stock DC brush: no GDI object is created per erase.
-    const COLORREF previous = SetDCBrushColor(dc, background_);
-    FillRect(dc, &clip, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
-    SetDCBrushColor(dc, previous);
-}
-
-void TabsContainer::refresh_appearance() noexcept {
-    refresh_colours();
-    refresh_font();
-}
-
-void TabsContainer::refresh_colours() noexcept {
+HostColours TabsContainer::host_colours() const noexcept {
+    HostColours out;
     try {
         const cui::colours::helper colours(guids::colour_client);
-        const COLORREF panel = colours.get_colour(cui::colours::colour_background);
-        StripTheme theme;
-        theme.background = panel;
-        theme.text = colours.get_colour(cui::colours::colour_text);
-        theme.dark = colours.is_dark_mode_active();
-        theme.active_fill = static_cast<float>(settings_.accent_strength) / 100.0f;
-
-        // The strip's own background: Columns UI's (lifted in dark mode by the strip), a custom
-        // colour, or the panel with some accent mixed in. Light or dark follows what is drawn.
-        std::uint32_t bg = colour::rgb_from_colorref(panel);
-        if (settings_.strip_background == StripBackground::custom) {
-            bg = settings_.background_argb & 0xFFFFFFu;
-            theme.lift = false;
-            theme.dark = colour::lightness(bg) < colour::light_background_lightness;
-        }
-        const auto mix = [](std::uint32_t a, std::uint32_t b, float t) {
-            const auto ch = [&](int shift) {
-                const float x = static_cast<float>((a >> shift) & 0xFFu);
-                const float y = static_cast<float>((b >> shift) & 0xFFu);
-                return static_cast<std::uint32_t>(std::lround(x * t + y * (1.0f - t))) << shift;
-            };
-            return ch(16) | ch(8) | ch(0);
-        };
-
-        // Every accent passes a 3:1 contrast floor against the strip. A cover colour is raw, so
-        // it also gets the full legibility treatment (lightness window, chroma floor; the same
-        // code as Media Bar and foo_osd). Columns UI's selection colour and a custom colour are
-        // the user's choice and are only nudged when they would vanish.
-        std::uint32_t accent = colour::rgb_from_colorref(colours.get_colour(cui::colours::colour_selection_background));
-        if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
-        std::optional<std::uint32_t> cover_raw;
-        if (settings_.accent_source == AccentSource::cover) {
-            cover_raw = cover::current();
-            if (cover_raw) accent = colour::accent_for_background(*cover_raw, bg);
-        }
-        accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
-
-        if (settings_.strip_background == StripBackground::accent_tint) {
-            // Tint what the strip would have shown (dark mode's lift included), then make sure
-            // the accent still stands out from its own tint.
-            const std::uint32_t text = colour::rgb_from_colorref(theme.text);
-            const std::uint32_t base = theme.dark ? mix(text, bg, 0.04f) : bg;
-            bg = mix(accent, base, static_cast<float>(settings_.tint_strength) / 100.0f);
-            theme.lift = false;
-            accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
-        }
-        if (!theme.lift) {
-            theme.text = colour::colorref_from_rgb(
-                colour::with_min_contrast(colour::rgb_from_colorref(theme.text), bg, 4.5f));
-        }
-        theme.background = colour::colorref_from_rgb(bg);
-        theme.accent = colour::colorref_from_rgb(accent);
-        if (cover_raw && colour::lightness(bg) >= colour::light_background_lightness) {
-            // A solid fill on a light strip: the cover's colour in the light window (yellow stays
-            // yellow instead of going olive); the strip picks dark text for it.
-            theme.fill_accent = colour::colorref_from_rgb(colour::accent_for_card(*cover_raw & 0xFFFFFFu, false));
-        }
-
-        background_ = panel;
-        hot_zone_.set_colour(panel);
-        strip_.set_theme(theme);
-        if (const HWND self = get_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
+        out.background = colours.get_colour(cui::colours::colour_background);
+        out.text = colours.get_colour(cui::colours::colour_text);
+        out.selection = colours.get_colour(cui::colours::colour_selection_background);
+        out.dark = colours.is_dark_mode_active();
     } catch (...) {
     }
+    return out;
 }
 
-void TabsContainer::refresh_font() noexcept {
+void TabsContainer::host_font(StripFont& font, StripTextOptions& options) const noexcept {
     try {
-        StripFont font;
         font.font = cui::fonts::get_log_font_with_fallback(guids::font_client);
         font.font_dpi = gfx::system_dpi();
-        StripTextOptions options;
         cui::fonts::rendering_options::ptr rendering;
         try {
             // Columns UI 3+: the DirectWrite font, its emoji fallback and the text rendering
@@ -1577,47 +437,95 @@ void TabsContainer::refresh_font() noexcept {
                 }
             }
         }
-
-        const int before = strip_.thickness();
-        strip_.set_text_options(options);
-        strip_.set_font(font);
-        if (strip_.thickness() != before && get_wnd() != nullptr) {
-            layout();
-            limits_changed();
-        }
     } catch (...) {
     }
 }
 
-void TabsContainer::on_cover_accent_changed() noexcept { refresh_colours(); }
-
-void TabsContainer::update_cover_subscription() noexcept {
-    const bool want = get_wnd() != nullptr && settings_.accent_source == AccentSource::cover;
-    if (want == cover_subscribed_) return;
-    cover_subscribed_ = want;
-    if (want) {
-        cover::subscribe(this);
-    } else {
-        cover::unsubscribe(this);
+bool TabsContainer::host_child_menu(Tab& base, HMENU menu, unsigned first, unsigned last) noexcept {
+    CuiTab& tab = cui(base);
+    if (!tab.window.is_valid()) return false;
+    try {
+        menu_hook_ = new uie::menu_hook_impl;
+        tab.window->get_menu_items(*menu_hook_.get_ptr());
+        if (menu_hook_->get_children_count() == 0) return false;
+        menu_hook_->win32_build_menu(menu, first, last - first);
+        return true;
+    } catch (...) {
+        return false;
     }
 }
 
-void TabsContainer::apply_settings() noexcept {
-    clamp(settings_);
-    strip_.set_settings(settings_);
-    update_cover_subscription();
-    refresh_colours();
-    ah_update_mode();
+void TabsContainer::host_child_menu_command(unsigned id) noexcept {
+    try {
+        if (menu_hook_.is_valid()) menu_hook_->execute_by_id(id);
+    } catch (...) {
+    }
+}
+
+void TabsContainer::host_tab_key(HWND from) noexcept {
+    try {
+        uie::window::g_on_tab(from);
+    } catch (...) {
+    }
+}
+
+bool TabsContainer::host_shortcut(WPARAM key) noexcept {
+    try {
+        const auto& parent = get_host();
+        if (parent.is_valid() && !parent->get_keyboard_shortcuts_enabled()) return false;
+        return uie::window::g_process_keydown_keyboard_shortcuts(key);
+    } catch (...) {
+        return false;
+    }
+}
+
+void TabsContainer::host_on_create() noexcept {
+    try {
+        host_ = fb2k::service_new<TabsHost>(this);
+    } catch (...) {
+    }
+}
+
+void TabsContainer::host_on_destroy() noexcept {
+    if (host_.is_valid()) host_->detach();
+    host_.release();
+}
+
+void TabsContainer::get_children(pfc::list_base_t<uie::window_ptr>& out) const {
+    for (const auto& tab : tabs_) {
+        if (cui(*tab).window.is_valid()) out.add_item(cui(*tab).window);
+    }
+}
+
+bool TabsContainer::self_visible() const {
+    const HWND self = get_wnd();
+    if (self == nullptr) return false;
+    const auto& parent = get_host();
+    return parent.is_valid() ? parent->is_visible(self) : IsWindowVisible(self) != FALSE;
+}
+
+void TabsContainer::relinquish(HWND wnd) noexcept {
+    // The child moved to another host: forget it without destroying it.
+    Tab* tab = find_by_wnd(wnd);
+    if (tab == nullptr) return;
+    const std::size_t index = index_of(tab);
+    const bool was_active = tab == active_;
+    if (was_active) active_ = nullptr;
+    tab->wnd = nullptr;
+    cui(*tab).window.release();
+    std::erase(config_tabs_, tab);
+    tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
+    rebuild_strip();
+    if (was_active) activate(fallback_after_removal(index), false);
     layout();
     limits_changed();
-    ah_evaluate();
 }
 
 // ---------------------------------------------------------------------------------------------
 // splitter_window.
 
 std::unique_ptr<Tab> TabsContainer::tab_from_item(const uie::splitter_item_t* item) const {
-    auto tab = std::make_unique<Tab>();
+    auto tab = std::make_unique<CuiTab>();
     tab->guid = item->get_panel_guid();
     pfc::array_t<t_uint8> config;
     item->get_panel_config_to_array(config, true);
@@ -1644,67 +552,17 @@ std::unique_ptr<Tab> TabsContainer::tab_from_item(const uie::splitter_item_t* it
 
 void TabsContainer::insert_panel(t_size index, const uie::splitter_item_t* item) {
     if (item == nullptr || index > tabs_.size()) return;
-    auto tab = tab_from_item(item);
-    Tab* raw = tab.get();
-    tabs_.insert(tabs_.begin() + static_cast<std::ptrdiff_t>(index), std::move(tab));
-    if (get_wnd() == nullptr) return;
-    ensure_object(*raw);
-    if (!settings_.lazy_children && tab_visible(*raw)) ensure_window(*raw);
-    rebuild_strip();
-    ensure_active_valid();
-    layout();
-    limits_changed();
-}
-
-void TabsContainer::remove_panel(t_size index) {
-    if (index >= tabs_.size()) return;
-    Tab* tab = tabs_[index].get();
-    const bool was_active = tab == active_;
-    if (get_wnd() != nullptr) {
-        if (was_active) {
-            // Move to the neighbour first, so the removal never exposes an empty area.
-            Tab* next = nullptr;
-            for (std::size_t i = index + 1; i < tabs_.size() && next == nullptr; ++i) {
-                if (tab_visible(*tabs_[i])) next = tabs_[i].get();
-            }
-            for (std::size_t i = index; i > 0 && next == nullptr; --i) {
-                if (tab_visible(*tabs_[i - 1])) next = tabs_[i - 1].get();
-            }
-            activate(next, false);
-        }
-        destroy_tab_window(*tab);
-    }
-    if (active_ == tab) active_ = nullptr;
-    tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
-    if (saved_active_ > index) --saved_active_;
-    if (get_wnd() == nullptr) return;
-    rebuild_strip();
-    ensure_active_valid();
-    layout();
-    limits_changed();
+    insert_tab(index, tab_from_item(item), false);
 }
 
 void TabsContainer::replace_panel(t_size index, const uie::splitter_item_t* item) {
     if (item == nullptr || index >= tabs_.size()) return;
-    auto tab = tab_from_item(item);
-    Tab* raw = tab.get();
-    const bool was_active = tabs_[index].get() == active_;
-    if (get_wnd() != nullptr) destroy_tab_window(*tabs_[index]);
-    if (was_active) active_ = nullptr;
-    tabs_[index] = std::move(tab);
-    if (get_wnd() == nullptr) return;
-    ensure_object(*raw);
-    if (!settings_.lazy_children && tab_visible(*raw)) ensure_window(*raw);
-    rebuild_strip();
-    if (was_active) activate(raw, false);
-    ensure_active_valid();
-    layout();
-    limits_changed();
+    replace_tab(index, tab_from_item(item));
 }
 
 uie::splitter_item_t* TabsContainer::get_panel(t_size index) const {
     if (index >= tabs_.size()) return nullptr;
-    const Tab& tab = *tabs_[index];
+    const CuiTab& tab = cui(*tabs_[index]);
     auto* item = new uie::splitter_item_full_v3_impl_t;
     item->set_panel_guid(tab.guid);
     Bytes config = tab.config;
@@ -1748,9 +606,9 @@ bool TabsContainer::is_point_ours(HWND wnd_point, const POINT& pt_screen,
         return true;
     }
     for (const auto& tab : tabs_) {
-        if (tab->wnd == nullptr || !tab->window.is_valid()) continue;
+        if (tab->wnd == nullptr || !cui(*tab).window.is_valid()) continue;
         uie::splitter_window_v2_ptr splitter;
-        if (tab->window->service_query_t(splitter)) {
+        if (cui(*tab).window->service_query_t(splitter)) {
             pfc::list_t<uie::window_ptr> nested;
             nested.add_item(this);
             if (splitter->is_point_ours(wnd_point, pt_screen, nested)) {
@@ -1759,26 +617,11 @@ bool TabsContainer::is_point_ours(HWND wnd_point, const POINT& pt_screen,
             }
         } else if (wnd_point == tab->wnd || IsChild(tab->wnd, wnd_point)) {
             hierarchy.add_item(this);
-            hierarchy.add_item(tab->window);
+            hierarchy.add_item(cui(*tab).window);
             return true;
         }
     }
     return false;
-}
-
-void TabsContainer::reorder_panels(const size_t* order, size_t count) {
-    // new[i] = old[order[i]] - what Columns UI's own splitters do (the header's wording reads the
-    // other way round). Anything that is not a permutation is ignored.
-    if (order == nullptr || count != tabs_.size()) return;
-    std::vector<bool> seen(count, false);
-    for (size_t i = 0; i < count; ++i) {
-        if (order[i] >= count || seen[order[i]]) return;
-        seen[order[i]] = true;
-    }
-    std::vector<std::unique_ptr<Tab>> reordered(count);
-    for (size_t i = 0; i < count; ++i) reordered[i] = std::move(tabs_[order[i]]);
-    tabs_ = std::move(reordered);
-    if (get_wnd() != nullptr) rebuild_strip();
 }
 
 bool TabsContainer::get_config_item_supported(t_size, const GUID& type) const {
@@ -1836,602 +679,18 @@ void TabsContainer::get_supported_panels(const pfc::list_base_const_t<uie::windo
     for (t_size i = 0; i < count; ++i) mask_unsupported.set(i, !windows[i]->is_available(host));
 }
 
-// ---------------------------------------------------------------------------------------------
-// Strip intents.
-
-void TabsContainer::on_strip_activate(std::size_t index) noexcept {
-    if (index < visible_.size()) activate(tabs_[visible_[index]].get(), true);
-}
-
-void TabsContainer::on_strip_step(int direction) noexcept {
-    if (visible_.empty()) return;
-    const std::size_t current = strip_index_of(active_);
-    std::size_t next = 0;
-    if (current == no_index) {
-        next = direction > 0 ? 0 : visible_.size() - 1;
-    } else if (direction < 0) {
-        if (current == 0) return;
-        next = current - 1;
-    } else {
-        if (current + 1 >= visible_.size()) return;
-        next = current + 1;
-    }
-    activate(tabs_[visible_[next]].get(), true);
-}
-
-void TabsContainer::on_strip_middle_click(std::size_t index) noexcept {
-    if (settings_.middle_click == MiddleClick::nothing || index >= visible_.size()) return;
-    set_tab_hidden(tabs_[visible_[index]].get(), true);
-}
-
-void TabsContainer::on_strip_reorder(std::size_t from, std::size_t to) noexcept {
-    if (from < visible_.size() && to < visible_.size() && from != to) {
-        // Next to the tab it was dropped on; hidden tabs in between keep their place.
-        move_tab(visible_[from], visible_[to]);
-    } else {
-        rebuild_strip();
-    }
-}
-
-void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items,
-                                  bool with_style) noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr) return;
-    const service_ptr_t<TabsContainer> keep_alive(this);
-    HMENU menu = CreatePopupMenu();
-    if (menu == nullptr) return;
-    try {
-        const std::vector<std::size_t> snapshot = visible_;
-        const Tab* clicked = strip_index < snapshot.size() ? tabs_[snapshot[strip_index]].get() : nullptr;
-        for (std::size_t s = 0; s < snapshot.size(); ++s) {
-            const Tab* tab = tabs_[snapshot[s]].get();
-            const std::wstring text = menu_text(tab->label.empty() ? std::wstring(L"(untitled)") : tab->label);
-            AppendMenuW(menu, MF_STRING | (tab == active_ ? MF_CHECKED : 0),
-                        menu_tab_base + static_cast<UINT>(s), text.c_str());
-        }
-        pfc::refcounted_object_ptr_t<uie::menu_hook_impl> hook = new uie::menu_hook_impl;
-        if (with_panel_items && clicked != nullptr && clicked->wnd != nullptr && clicked->window.is_valid()) {
-            clicked->window->get_menu_items(*hook.get_ptr());
-            if (hook->get_children_count() > 0) {
-                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-                hook->win32_build_menu(menu, menu_panel_base, 0x7FFF0000u - menu_panel_base);
-            }
-        }
-        std::vector<Tab*> hidden;
-        if (with_style) {
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            if (clicked != nullptr) {
-                const bool side =
-                    settings_.position == StripPosition::left || settings_.position == StripPosition::right;
-                const UINT first = strip_index == 0 ? MF_GRAYED : 0;
-                const UINT last = strip_index + 1 >= snapshot.size() ? MF_GRAYED : 0;
-                AppendMenuW(menu, MF_STRING, cmd_rename, L"Rename...");
-                AppendMenuW(menu, MF_STRING | (snapshot.size() < 2 ? MF_GRAYED : 0), cmd_hide, L"Hide tab");
-                AppendMenuW(menu, MF_STRING | first, cmd_move_back, side ? L"Move up" : L"Move left");
-                AppendMenuW(menu, MF_STRING | last, cmd_move_forward, side ? L"Move down" : L"Move right");
-            }
-            for (const auto& tab : tabs_) {
-                if (tab->extra.hidden) hidden.push_back(tab.get());
-            }
-            if (!hidden.empty()) {
-                if (HMENU sub = CreatePopupMenu(); sub != nullptr) {
-                    for (std::size_t i = 0; i < hidden.size(); ++i) {
-                        std::wstring name = hidden[i]->label.empty() ? panel_name(*hidden[i]) : hidden[i]->label;
-                        AppendMenuW(sub, MF_STRING, menu_unhide_base + static_cast<UINT>(i), menu_text(name).c_str());
-                    }
-                    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sub), L"Show hidden tab");
-                }
-            }
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            append_style_menu(menu);
-            AppendMenuW(menu, MF_STRING, cmd_configure, L"Configure...");
-        }
-        const UINT cmd = static_cast<UINT>(TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD,
-                                                          screen.x, screen.y, 0, self, nullptr));
-        DestroyMenu(menu);
-        menu = nullptr;
-        if (cmd >= menu_panel_base) {
-            hook->execute_by_id(cmd);
-        } else if (cmd >= menu_style_base && cmd < style_last) {
-            run_style_command(cmd);
-        } else if (cmd >= menu_unhide_base && cmd < menu_style_base) {
-            const std::size_t h = cmd - menu_unhide_base;
-            if (h < hidden.size()) set_tab_hidden(hidden[h], false);
-        } else if (cmd >= menu_cmd_base && cmd < menu_unhide_base) {
-            Tab* tab = const_cast<Tab*>(clicked);
-            const bool valid = tab != nullptr && snapshot == visible_;
-            switch (cmd) {
-            case cmd_rename:
-                if (valid) rename_tab(tab);
-                break;
-            case cmd_hide:
-                if (valid) set_tab_hidden(tab, true);
-                break;
-            case cmd_move_back:
-                if (valid && strip_index > 0) move_tab(snapshot[strip_index], snapshot[strip_index - 1]);
-                break;
-            case cmd_move_forward:
-                if (valid && strip_index + 1 < snapshot.size()) {
-                    move_tab(snapshot[strip_index], snapshot[strip_index + 1]);
-                }
-                break;
-            case cmd_configure: show_config_popup(self); break;
-            default: break;
-            }
-        } else if (cmd >= menu_tab_base && cmd < menu_cmd_base) {
-            const std::size_t s = cmd - menu_tab_base;
-            // The tab list may have changed while the menu was open.
-            if (s < snapshot.size() && snapshot == visible_) activate(tabs_[snapshot[s]].get(), true);
-        }
-    } catch (const std::exception& e) {
-        log::warn(std::string("tab menu failed: ") + e.what());
-    }
-    if (menu != nullptr) DestroyMenu(menu);
-}
-
-void TabsContainer::on_strip_menu(std::size_t index, POINT screen) noexcept {
-    // Pins an auto-hidden strip for the menu and any dialog it opens.
-    menu_pin_ = true;
-    show_tab_menu(index != no_index ? index : strip_index_of(active_), screen, index != no_index, true);
-    menu_pin_ = false;
-    ah_evaluate();
-}
-
-void TabsContainer::on_strip_overflow(POINT screen) noexcept {
-    menu_pin_ = true;
-    show_tab_menu(no_index, screen, false, false);
-    menu_pin_ = false;
-    ah_evaluate();
-}
-
-void TabsContainer::append_style_menu(HMENU menu) const noexcept {
-    HMENU style = CreatePopupMenu();
-    if (style == nullptr) return;
-    const auto radio = [](HMENU m, unsigned id, const wchar_t* text, bool on) {
-        AppendMenuW(m, MF_STRING | (on ? MF_CHECKED : 0), id, text);
-        if (on) {
-            MENUITEMINFOW mii{sizeof(mii)};
-            mii.fMask = MIIM_FTYPE;
-            mii.fType = MFT_STRING | MFT_RADIOCHECK;
-            SetMenuItemInfoW(m, id, FALSE, &mii);
-        }
-    };
-    const auto sub = [&](const wchar_t* text) {
-        HMENU m = CreatePopupMenu();
-        if (m != nullptr) AppendMenuW(style, MF_POPUP, reinterpret_cast<UINT_PTR>(m), text);
-        return m;
-    };
-    const Settings& s = settings_;
-    if (HMENU m = sub(L"Strip position"); m != nullptr) {
-        radio(m, style_position_top, L"Top", s.position == StripPosition::top);
-        radio(m, style_position_bottom, L"Bottom", s.position == StripPosition::bottom);
-        radio(m, style_position_left, L"Left", s.position == StripPosition::left);
-        radio(m, style_position_right, L"Right", s.position == StripPosition::right);
-        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-        const bool side = s.position == StripPosition::left || s.position == StripPosition::right;
-        AppendMenuW(m, MF_STRING | (s.side_text == SideText::rotated ? MF_CHECKED : 0) | (side ? 0 : MF_GRAYED),
-                    style_rotate_side_text, L"Rotate text on side strips");
-    }
-    if (HMENU m = sub(L"Active tab"); m != nullptr) {
-        radio(m, style_indicator_underline, L"Underline", s.indicator == Indicator::underline);
-        radio(m, style_indicator_pill, L"Pill", s.indicator == Indicator::pill);
-        radio(m, style_indicator_none, L"Text only", s.indicator == Indicator::none);
-        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(m, MF_STRING | (s.chip ? MF_CHECKED : 0), style_chip, L"Chips");
-    }
-    if (HMENU m = sub(L"Accent colour"); m != nullptr) {
-        radio(m, style_accent_selection, L"Columns UI selection colour", s.accent_source == AccentSource::selection);
-        radio(m, style_accent_cover, L"From the playing cover", s.accent_source == AccentSource::cover);
-        radio(m, style_accent_custom, L"Custom...", s.accent_source == AccentSource::custom);
-    }
-    if (HMENU m = sub(L"Accent strength"); m != nullptr) {
-        // Opacity of the active tab's fill; the underline is always solid.
-        const UINT grey = s.indicator == Indicator::pill || s.chip ? 0 : MF_GRAYED;
-        const auto level = [&](unsigned id, const wchar_t* text, bool on) {
-            radio(m, id, text, on);
-            if (grey != 0) EnableMenuItem(m, id, MF_BYCOMMAND | MF_GRAYED);
-        };
-        const std::uint8_t a = s.accent_strength;
-        level(style_strength_auto, L"Automatic", a == 0);
-        level(style_strength_subtle, L"Subtle (15%)", a == 15);
-        level(style_strength_medium, L"Medium (35%)", a == 35);
-        level(style_strength_strong, L"Strong (60%)", a == 60);
-        level(style_strength_solid, L"Solid", a == 100);
-    }
-    if (HMENU m = sub(L"Strip background"); m != nullptr) {
-        radio(m, style_background_theme, L"Columns UI background", s.strip_background == StripBackground::theme);
-        radio(m, style_background_tint, L"Tinted with the accent", s.strip_background == StripBackground::accent_tint);
-        radio(m, style_background_custom, L"Custom...", s.strip_background == StripBackground::custom);
-    }
-    if (HMENU m = sub(L"Tab width"); m != nullptr) {
-        radio(m, style_sizing_fit, L"Fit the title", s.sizing == TabSizing::fit);
-        radio(m, style_sizing_equal, L"All equal", s.sizing == TabSizing::equal);
-        radio(m, style_sizing_fill, L"Fill the strip", s.sizing == TabSizing::fill);
-        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-        const bool slack = s.sizing != TabSizing::fill;
-        const UINT grey = slack ? 0 : MF_GRAYED;
-        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::start ? MF_CHECKED : 0), style_align_start,
-                    L"Align to start");
-        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::centre ? MF_CHECKED : 0), style_align_centre,
-                    L"Centre");
-        AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::end ? MF_CHECKED : 0), style_align_end,
-                    L"Align to end");
-    }
-    if (HMENU m = sub(L"Show strip"); m != nullptr) {
-        radio(m, style_show_always, L"Always", s.visibility == StripVisibility::always);
-        radio(m, style_show_two_or_more, L"Only with two or more tabs",
-              s.visibility == StripVisibility::two_or_more);
-        radio(m, style_show_auto_hide, L"Auto-hide", s.visibility == StripVisibility::auto_hide);
-    }
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(style), L"Appearance");
-}
-
-namespace {
-
-//! The system colour picker, seeded with and writing back 0xAARRGGBB. False if cancelled.
-bool pick_colour(std::uint32_t& argb) noexcept {
-    static COLORREF custom_colours[16]{};
-    CHOOSECOLORW cc{sizeof(cc)};
-    cc.hwndOwner = core_api::get_main_window();
-    cc.rgbResult = colour::colorref_from_rgb(argb & 0xFFFFFFu);
-    cc.lpCustColors = custom_colours;
-    cc.Flags = CC_RGBINIT | CC_FULLOPEN;
-    if (!ChooseColorW(&cc)) return false;
-    argb = 0xFF000000u | colour::rgb_from_colorref(cc.rgbResult);
-    return true;
-}
-
-} // namespace
-
-void TabsContainer::run_style_command(unsigned command) noexcept {
-    Settings& s = settings_;
-    switch (command) {
-    case style_position_top: s.position = StripPosition::top; break;
-    case style_position_bottom: s.position = StripPosition::bottom; break;
-    case style_position_left: s.position = StripPosition::left; break;
-    case style_position_right: s.position = StripPosition::right; break;
-    case style_rotate_side_text:
-        s.side_text = s.side_text == SideText::rotated ? SideText::horizontal : SideText::rotated;
-        break;
-    case style_indicator_underline: s.indicator = Indicator::underline; break;
-    case style_indicator_pill: s.indicator = Indicator::pill; break;
-    case style_indicator_none: s.indicator = Indicator::none; break;
-    case style_chip: s.chip = !s.chip; break;
-    case style_accent_selection: s.accent_source = AccentSource::selection; break;
-    case style_accent_cover: s.accent_source = AccentSource::cover; break;
-    case style_accent_custom: {
-        if (!pick_colour(s.accent_argb)) return;
-        s.accent_source = AccentSource::custom;
-        break;
-    }
-    case style_strength_auto: s.accent_strength = 0; break;
-    case style_strength_subtle: s.accent_strength = 15; break;
-    case style_strength_medium: s.accent_strength = 35; break;
-    case style_strength_strong: s.accent_strength = 60; break;
-    case style_strength_solid: s.accent_strength = 100; break;
-    case style_background_theme: s.strip_background = StripBackground::theme; break;
-    case style_background_tint: s.strip_background = StripBackground::accent_tint; break;
-    case style_background_custom: {
-        if (!pick_colour(s.background_argb)) return;
-        s.strip_background = StripBackground::custom;
-        break;
-    }
-    case style_sizing_fit: s.sizing = TabSizing::fit; break;
-    case style_sizing_equal: s.sizing = TabSizing::equal; break;
-    case style_sizing_fill: s.sizing = TabSizing::fill; break;
-    case style_align_start: s.align = TabAlign::start; break;
-    case style_align_centre: s.align = TabAlign::centre; break;
-    case style_align_end: s.align = TabAlign::end; break;
-    case style_show_always: s.visibility = StripVisibility::always; break;
-    case style_show_two_or_more: s.visibility = StripVisibility::two_or_more; break;
-    case style_show_auto_hide: s.visibility = StripVisibility::auto_hide; break;
-    default: return;
-    }
-    apply_settings();
-}
-
-bool TabsContainer::show_config_popup(HWND parent) {
-    const service_ptr_t<TabsContainer> keep_alive(this);
-    ConfigureState original;
-    original.settings = settings_;
-    config_tabs_.clear();
-    for (std::size_t i = 0; i < tabs_.size(); ++i) {
-        config_tabs_.push_back(tabs_[i].get());
-        original.tabs.push_back(TabEdit{i, panel_name(*tabs_[i]), tabs_[i]->extra});
-    }
-    ConfigureState state = original;
-    const bool live = get_wnd() != nullptr;
-    bool ok = false;
-    try {
-        ok = run_configure_dialog(parent != nullptr ? parent : core_api::get_main_window(), state, *this, live);
-    } catch (const std::exception& e) {
-        log::warn(std::string("the Configure dialog failed: ") + e.what());
-    }
-    // Cancel puts back what the live preview changed.
-    preview(ok ? state : original);
-    if (ok) commit_removals();
-    config_tabs_.clear();
-    return ok;
-}
-
-void TabsContainer::commit_removals() noexcept {
-    bool removed = false;
-    for (std::size_t i = tabs_.size(); i-- > 0;) {
-        Tab* tab = tabs_[i].get();
-        if (!tab->pending_removal) continue;
-        if (tab == active_) active_ = nullptr;
-        if (get_wnd() != nullptr) destroy_tab_window(*tab);
-        tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(i));
-        if (saved_active_ > i) --saved_active_;
-        removed = true;
-    }
-    if (!removed || get_wnd() == nullptr) return;
-    rebuild_strip();
-    ensure_active_valid();
-    layout();
-    limits_changed();
-}
-
-void TabsContainer::preview(const ConfigureState& state) noexcept {
-    try {
-        settings_ = state.settings;
-        clamp(settings_);
-        // The dialog's order, if it still describes the tabs this container has. Tabs the
-        // dialog removed go to the end, marked; they are deleted only on OK.
-        const std::size_t count = tabs_.size();
-        bool same = state.tabs.size() <= count && config_tabs_.size() == count;
-        std::vector<size_t> order;
-        std::vector<bool> kept(count, false);
-        for (std::size_t i = 0; same && i < state.tabs.size(); ++i) {
-            const std::size_t id = state.tabs[i].id;
-            const std::size_t index = id < config_tabs_.size() ? index_of(config_tabs_[id]) : no_index;
-            if (index == no_index || kept[index]) {
-                same = false;
-                break;
-            }
-            kept[index] = true;
-            order.push_back(index);
-        }
-        if (same) {
-            for (std::size_t i = 0; i < count; ++i) {
-                if (!kept[i]) order.push_back(i);
-            }
-            reorder_panels(order.data(), order.size());
-            for (std::size_t i = 0; i < count; ++i) {
-                Tab& tab = *tabs_[i];
-                tab.pending_removal = i >= state.tabs.size();
-                if (tab.pending_removal) continue;
-                tab.extra = state.tabs[i].extra;
-                update_label(tab);
-            }
-        }
-        if (get_wnd() == nullptr) return;
-        strip_.set_settings(settings_);
-        update_cover_subscription();
-        refresh_colours();
-        if (!settings_.lazy_children) {
-            for (auto& tab : tabs_) {
-                if (tab_visible(*tab)) ensure_window(*tab);
-            }
-        }
-        ah_update_mode();
-        rebuild_strip();
-        ensure_active_valid();
-        layout();
-        limits_changed();
-        ah_evaluate();
-    } catch (const std::exception& e) {
-        log::warn(std::string("could not apply the settings: ") + e.what());
-    }
-}
-
-bool TabsContainer::on_strip_key(UINT message, WPARAM key) noexcept {
-    try {
-        if (message == WM_KEYDOWN && key == VK_TAB) {
-            uie::window::g_on_tab(strip_.hwnd());
-            return true;
-        }
-        const auto& parent = get_host();
-        if (parent.is_valid() && !parent->get_keyboard_shortcuts_enabled()) return false;
-        return uie::window::g_process_keydown_keyboard_shortcuts(key);
-    } catch (...) {
-        return false;
-    }
-}
-
-void TabsContainer::on_strip_metrics_changed() noexcept {
-    // A DPI change usually means another monitor: its text rendering parameters differ.
-    refresh_font();
-    layout();
-    limits_changed();
-}
-
-// ---------------------------------------------------------------------------------------------
-// Auto-hide (PLAN.md 5.4). Event driven: the hot zone and the strip report the pointer
-// (TrackMouseEvent), menus, drags and focus pin it. One delay timer and, while a show/hide
-// animation runs, one frame timer. Nothing runs while idle.
-
-int TabsContainer::ah_px(unsigned dip) const noexcept {
-    const unsigned dpi = get_wnd() != nullptr ? gfx::window_dpi(get_wnd()) : gfx::system_dpi();
-    return MulDiv(static_cast<int>(dip), static_cast<int>(dpi), 96);
-}
-
-void TabsContainer::ah_update_mode() noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr || strip_.hwnd() == nullptr || !auto_hide()) {
-        if (self != nullptr) {
-            KillTimer(self, timer_ah_delay);
-            KillTimer(self, timer_ah_frame);
-        }
-        ah_timer_ = AhTimer::none;
-        ah_animating_ = false;
-        ah_shown_ = false;
-        ah_progress_ = 0.0f;
-        hot_zone_.destroy();
-        (void)strip_.set_layered(false);
-        return;
-    }
-    // Child layered windows are Windows 8+. Ask for the invisible hot zone there; if Windows
-    // grants it, the strip can be layered too and go over the panel.
-    if (hot_zone_.hwnd() == nullptr) (void)hot_zone_.create(self, *this, gfx::layered_children_supported());
-    hot_zone_.set_colour(background_);
-    const bool want_layered = settings_.reveal_mode == RevealMode::overlay && hot_zone_.layered();
-    if (!strip_.set_layered(want_layered) && want_layered) log::warn("auto-hide: the strip could not be layered; pushing the panel instead");
-    if (settings_.show_hide_animation == ShowHideAnimation::none || !ah_overlay()) {
-        KillTimer(self, timer_ah_frame);
-        ah_animating_ = false;
-        ah_progress_ = ah_shown_ ? 1.0f : 0.0f;
-    }
-}
-
-void TabsContainer::ah_raise() noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr) return;
-    // Hot zone, then strip, so the strip ends up first; only when something got above them.
-    for (const HWND wnd : {hot_zone_.hwnd(), strip_.hwnd()}) {
-        if (wnd == nullptr || !IsWindowVisible(wnd)) continue;
-        if (GetWindow(self, GW_CHILD) == wnd) continue;
-        SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-    }
-}
-
-bool TabsContainer::ah_pointer_or_pinned() const noexcept {
-    const HWND strip = strip_.hwnd();
-    if (menu_pin_ || strip_.dragging()) return true;
-    if (strip != nullptr && (GetCapture() == strip || GetFocus() == strip)) return true;
-    POINT pt{};
-    if (!GetCursorPos(&pt)) return false;
-    for (const HWND wnd : {strip, hot_zone_.hwnd()}) {
-        if (wnd == nullptr || !IsWindowVisible(wnd)) continue;
-        RECT rc{};
-        if (GetWindowRect(wnd, &rc) && PtInRect(&rc, pt)) return true;
-    }
-    return false;
-}
-
-void TabsContainer::ah_set_timer(AhTimer kind, unsigned ms) noexcept {
-    const HWND self = get_wnd();
-    ah_timer_ = kind;
-    if (self == nullptr) return;
-    if (kind == AhTimer::none) {
-        KillTimer(self, timer_ah_delay);
-    } else {
-        SetTimer(self, timer_ah_delay, (std::max)(ms, static_cast<unsigned>(USER_TIMER_MINIMUM)), nullptr);
-    }
-}
-
-void TabsContainer::ah_evaluate() noexcept {
-    if (!auto_hide() || get_wnd() == nullptr || strip_.hwnd() == nullptr) return;
-    if (ah_pointer_or_pinned()) {
-        if (ah_shown_) {
-            if (ah_timer_ == AhTimer::hide) ah_set_timer(AhTimer::none, 0);
-            return;
-        }
-        if (settings_.reveal_delay_ms == 0) {
-            ah_set_timer(AhTimer::none, 0);
-            ah_set_shown(true);
-        } else if (ah_timer_ != AhTimer::reveal) {
-            ah_set_timer(AhTimer::reveal, settings_.reveal_delay_ms);
-        }
-        return;
-    }
-    if (!ah_shown_) {
-        if (ah_timer_ == AhTimer::reveal) ah_set_timer(AhTimer::none, 0);
-        return;
-    }
-    if (ah_timer_ == AhTimer::hide) return;
-    unsigned delay = settings_.hide_delay_ms;
-    const ULONGLONG now = GetTickCount64();
-    if (linger_until_ > now) delay = (std::max)(delay, static_cast<unsigned>(linger_until_ - now));
-    if (delay == 0) {
-        ah_set_timer(AhTimer::none, 0);
-        ah_set_shown(false);
-    } else {
-        ah_set_timer(AhTimer::hide, delay);
-    }
-}
-
-void TabsContainer::ah_set_shown(bool shown) noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr || shown == ah_shown_) return;
-    ah_shown_ = shown;
-    const bool animate = ah_overlay() && settings_.show_hide_animation != ShowHideAnimation::none;
-    if (animate) {
-        ah_from_ = ah_progress_;
-        ah_anim_start_ = GetTickCount64();
-        ah_animating_ = true;
-        SetTimer(self, timer_ah_frame, USER_TIMER_MINIMUM, nullptr);
-    } else {
-        KillTimer(self, timer_ah_frame);
-        ah_animating_ = false;
-        ah_progress_ = shown ? 1.0f : 0.0f;
-    }
-    layout();
-    if (shown) strip_.track_pointer();
-}
-
-void TabsContainer::ah_on_timer(UINT_PTR id) noexcept {
-    const HWND self = get_wnd();
-    if (self == nullptr) return;
-    if (id == timer_ah_delay) {
-        const AhTimer kind = ah_timer_;
-        ah_set_timer(AhTimer::none, 0);
-        const bool want = ah_pointer_or_pinned();
-        if (kind == AhTimer::reveal && want) ah_set_shown(true);
-        if (kind == AhTimer::hide && !want) ah_set_shown(false);
-        return;
-    }
-    if (id != timer_ah_frame) return;
-    const float target = ah_shown_ ? 1.0f : 0.0f;
-    // A reversal mid-way takes only the remaining share of the duration.
-    const float span = (std::max)(0.05f, std::fabs(target - ah_from_));
-    const float duration = static_cast<float>(settings_.animation_ms) * span;
-    const float t = std::clamp(static_cast<float>(GetTickCount64() - ah_anim_start_) / duration, 0.0f, 1.0f);
-    const float eased = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // ease-out cubic
-    ah_progress_ = ah_from_ + (target - ah_from_) * eased;
-    if (t >= 1.0f) {
-        ah_progress_ = target;
-        ah_animating_ = false;
-        KillTimer(self, timer_ah_frame);
-    }
-    layout();
-    // A slide ends under the pointer: arm the leave tracking again.
-    if (!ah_animating_ && ah_shown_) strip_.track_pointer();
-}
-
-void TabsContainer::ah_note_switch() noexcept {
-    if (!auto_hide() || get_wnd() == nullptr) return;
-    linger_until_ = GetTickCount64() + settings_.linger_ms;
-    if (!ah_shown_ && settings_.linger_ms != 0) {
-        ah_set_timer(AhTimer::none, 0);
-        ah_set_shown(true);
-    }
-    ah_evaluate();
-}
-
-void TabsContainer::on_strip_pointer() noexcept { ah_evaluate(); }
-
-void TabsContainer::on_hot_zone(bool, bool clicked) noexcept {
-    if (clicked && auto_hide() && !ah_shown_) {
-        // A click in the hot zone reveals at once, whatever the delay.
-        ah_set_timer(AhTimer::none, 0);
-        ah_set_shown(true);
-        return;
-    }
-    ah_evaluate();
-}
-
 uie::window_factory<TabsContainer> g_container_factory;
 
 // ---------------------------------------------------------------------------------------------
-// Colours and fonts pages. Singletons: fan changes out to the live containers.
+// Colours and fonts pages. Singletons: fan changes out to the live containers (the Default UI
+// ones too: they ignore Columns UI's settings but refreshing them is harmless).
 
 void refresh_all_colours() noexcept {
-    for (TabsContainer* container : live_containers()) container->refresh_colours();
+    for (TabsCore* container : TabsCore::live()) container->refresh_colours();
 }
 
 void refresh_all_fonts() noexcept {
-    for (TabsContainer* container : live_containers()) container->refresh_font();
+    for (TabsCore* container : TabsCore::live()) container->refresh_font();
 }
 
 class ColourClient : public cui::colours::client {

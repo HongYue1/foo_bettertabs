@@ -595,3 +595,35 @@ To add once verified in a build (AGENTS.md: verify before writing):
 - 0.4.0 beta 4: no colour fade, at the user's request (white to black text passes through grey).
   Text and icon colours switch at once to the final state, the strong-fill contrast pick included
   (judged against the fill the tab ends with); only the indicator slides.
+
+### 0.5.0 beta 1 (M(e): Default UI container)
+
+- Refactor: the old 2467-line `container.cpp` is now `TabsCore` (`src/hosts/tabs_core.h/.cpp`:
+  tabs, strip, switching, layout, auto-hide, colours, menus, Configure, follow playback,
+  Ctrl+Tab) plus two hosts. `Tab` is a base struct; each host derives its own child handle
+  (`CuiTab`: `uie::window_ptr`; `DuiTab`: `ui_element_instance_ptr` + callback + serial). Hosts
+  fill in `host_*` hooks (create/destroy child, config, labels, limits, colours, font, Tab key,
+  shortcuts, strip menu override, child menu items, shown/hidden notify). `core_message` handles
+  the shared window messages. `TabsCore::live()` replaces the CUI-only list; the playback watch,
+  Ctrl+Tab filter and the CUI colour/font clients iterate it. Insert/remove/replace/reorder are
+  core helpers. The Configure dialog and Appearance menu name the host ("Default UI selection
+  colour") through `ConfigureState::ui_name` / `host_ui_name()`.
+- Default UI (`src/hosts/dui_container.cpp`): `ui_element_v2`, subclass containers, GUID
+  `guids::dui_element`. Same instance blob as CUI (child guid = element GUID, child config =
+  element data). Default config: one empty child (`guid_null`), shown as the dummy element.
+  `enumerate_children` exposes the children; `import` takes over another container's children.
+  Own window class (`WS_EX_CONTROLPARENT`, clip children/siblings). Children are created lazily
+  like CUI's, each with its own `ui_element_instance_callback_v3` (orphaned on destroy).
+  `is_elem_visible` = we are visible and the tab is shown; visibility_changed is sent on switch.
+  Colours: `query_std_color(background/text/selection)`, `is_dark_mode()`; font: `ui_font_tabs`
+  (GDI LOGFONT). Shortcuts: `keyboard_shortcut_manager::on_keydown_auto`. Focus routes to the
+  shown child; `set_default_focus_subclass` may switch tab (lazy tabs match by element subclass).
+- Layout editing: a child's WM_CONTEXTMENU (edit mode) gets `standard_edit_context_menu` plus
+  Rename / Remove / Configure; a strip right-click in edit mode is sent to our parent, whose
+  standard menu for this element shows our items (Add new tab, Paste as new tab, and for the
+  clicked tab Replace / Copy / Rename / Remove). Removing the last tab leaves an empty one.
+  Replace keeps the tab's title settings and uses `ui_element::import` on the old config.
+- Destruction: the DUI host may release the instance without destroying the window; the
+  destructor does it, with `dying_` blocking anything that would AddRef a zero-count object.
+- A missing element's tab shows "(missing element)"; its config is kept (the dummy's own config
+  is ignored because its GUID differs).

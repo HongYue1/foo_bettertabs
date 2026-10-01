@@ -27,6 +27,8 @@ struct ConfigureState {
     Settings settings;
     //! In the order the dialog shows them.
     std::vector<TabEdit> tabs;
+    //! "Columns UI" or "Default UI": the host's colours in the combo boxes.
+    const wchar_t* ui_name{L"Columns UI"};
 };
 
 class ConfigureTarget {

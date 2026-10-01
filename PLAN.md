@@ -466,3 +466,9 @@ To add once verified in a build (AGENTS.md: verify before writing):
 - Interim UI: an "Appearance" submenu on the strip's right-click menu sets these per instance
   until the Configure dialog lands in M(c). Custom accent uses `ChooseColorW` (not dark-themed).
 - Render test (`test/render_test.cpp`) draws the real StripWindow into PNGs at 96/144/192 DPI.
+- Cover accent verified identical to foo_mediabar (same extraction, 256 px Fant decode, same
+  `accent_for_card` + 3:1 safety net); foo_osd shares the algorithm and constants.
+- 0.2.1 (user feedback): accent strength (active fill opacity: automatic / 15 / 35 / 60 / solid;
+  from 40% on the active text is picked for 4.5:1 against the fill), automatic light pill raised
+  0.20 -> 0.26; strip background: Columns UI / tinted with the accent (12%) / custom (light or
+  dark judged from the colour, text nudged to 4.5:1). Settings ids 30-33.

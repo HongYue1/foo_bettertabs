@@ -9,6 +9,7 @@
 #include <cmath>
 #include <string>
 
+#include "../model/colour.h"
 #include "../platform/graphics.h"
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -25,7 +26,7 @@ constexpr float wide_layout = 100000.0f;
     return reinterpret_cast<HINSTANCE>(&__ImageBase);
 }
 
-[[nodiscard]] D2D1_COLOR_F colour(COLORREF c, float alpha = 1.0f) noexcept {
+[[nodiscard]] D2D1_COLOR_F d2d_colour(COLORREF c, float alpha = 1.0f) noexcept {
     return D2D1_COLOR_F{static_cast<float>(GetRValue(c)) / 255.0f, static_cast<float>(GetGValue(c)) / 255.0f,
                         static_cast<float>(GetBValue(c)) / 255.0f, alpha};
 }
@@ -53,7 +54,10 @@ constexpr float hover_alpha_light = 0.06f;
 constexpr float chip_alpha = 0.05f;
 constexpr float chip_active_alpha = 0.18f;
 constexpr float pill_alpha_dark = 0.30f;
-constexpr float pill_alpha_light = 0.20f;
+constexpr float pill_alpha_light = 0.26f;
+//! From this fill opacity on, the active tab's text is chosen for contrast against the fill.
+constexpr float strong_fill = 0.40f;
+constexpr float text_min_contrast = 4.5f;
 constexpr float inactive_text = 0.70f;
 //! Dark mode only: the strip is lifted off the panel so it reads as chrome, not content.
 constexpr float dark_lift = 0.04f;
@@ -116,7 +120,7 @@ void StripWindow::set_settings(const Settings& settings) noexcept {
 void StripWindow::set_theme(const StripTheme& theme) noexcept {
     if (theme == theme_) return;
     theme_ = theme;
-    surface_ = theme.dark ? blend(theme.text, theme.background, dark_lift) : theme.background;
+    surface_ = theme.dark && theme.lift ? blend(theme.text, theme.background, dark_lift) : theme.background;
     if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
 }
 
@@ -494,7 +498,7 @@ bool StripWindow::ensure_target() noexcept {
                                               96.0f, 96.0f, D2D1_RENDER_TARGET_USAGE_NONE,
                                               D2D1_FEATURE_LEVEL_DEFAULT};
     if (FAILED(factory->CreateDCRenderTarget(&props, target_.put()))) return false;
-    if (FAILED(target_->CreateSolidColorBrush(colour(theme_.text), brush_.put()))) {
+    if (FAILED(target_->CreateSolidColorBrush(d2d_colour(theme_.text), brush_.put()))) {
         target_.reset();
         return false;
     }
@@ -514,7 +518,7 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
     target_->BeginDraw();
     target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
     target_->SetTextAntialiasMode(text_antialias());
-    target_->Clear(colour(surface_));
+    target_->Clear(d2d_colour(surface_));
 
     for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
         const RECT r = tab_rect(i);
@@ -586,19 +590,20 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     // drawn on top keeps ClearType.
     float fill_alpha = 0.0f;
     COLORREF fill = theme_.text;
+    const bool accent_fill = active && (settings_.indicator == Indicator::pill || settings_.chip);
     if (active && settings_.indicator == Indicator::pill) {
         fill = theme_.accent;
-        fill_alpha = theme_.dark ? pill_alpha_dark : pill_alpha_light;
+        fill_alpha = theme_.active_fill > 0.0f ? theme_.active_fill : (theme_.dark ? pill_alpha_dark : pill_alpha_light);
     } else if (active && settings_.chip) {
         fill = theme_.accent;
-        fill_alpha = chip_active_alpha;
+        fill_alpha = theme_.active_fill > 0.0f ? theme_.active_fill : chip_active_alpha;
     } else if (hover) {
         fill_alpha = (theme_.dark ? hover_alpha_dark : hover_alpha_light) + (settings_.chip ? chip_alpha : 0.0f);
     } else if (settings_.chip) {
         fill_alpha = chip_alpha;
     }
     if (fill_alpha > 0.0f) {
-        brush_->SetColor(colour(fill, fill_alpha));
+        brush_->SetColor(d2d_colour(fill, fill_alpha));
         target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
     }
 
@@ -613,7 +618,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         case Edge::right: u = {f.right - bar, f.top + inset_along * 2, f.right, f.bottom - inset_along * 2}; break;
         case Edge::left: u = {f.left, f.top + inset_along * 2, f.left + bar, f.bottom - inset_along * 2}; break;
         }
-        brush_->SetColor(colour(theme_.accent));
+        brush_->SetColor(d2d_colour(theme_.accent));
         target_->FillRoundedRectangle(D2D1::RoundedRect(u, bar / 2.0f, bar / 2.0f), brush_.get());
     }
 
@@ -624,8 +629,18 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - item.draw_width) / 2.0f));
         }
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
-        const COLORREF text = active || hover ? theme_.text : blend(theme_.text, surface_, inactive_text);
-        brush_->SetColor(colour(text));
+        COLORREF text = active || hover ? theme_.text : blend(theme_.text, surface_, inactive_text);
+        if (accent_fill && fill_alpha >= strong_fill) {
+            // A strong accent fill: keep the theme's text if it still reads, else white or black.
+            const std::uint32_t under = colour::rgb_from_colorref(blend(fill, surface_, fill_alpha));
+            const std::uint32_t own = colour::rgb_from_colorref(text);
+            if (colour::contrast_ratio(own, under) < text_min_contrast) {
+                text = colour::contrast_ratio(0xFFFFFFu, under) >= colour::contrast_ratio(0x000000u, under)
+                           ? RGB(255, 255, 255)
+                           : RGB(0, 0, 0);
+            }
+        }
+        brush_->SetColor(d2d_colour(text));
         target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
         target_->DrawTextLayout(D2D1::Point2F(x, y), item.layout.get(), brush_.get(), draw_text_options_);
         target_->PopAxisAlignedClip();
@@ -637,7 +652,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         focus.top += 0.5f;
         focus.right -= 0.5f;
         focus.bottom -= 0.5f;
-        brush_->SetColor(colour(theme_.text, 0.6f));
+        brush_->SetColor(d2d_colour(theme_.text, 0.6f));
         target_->DrawRoundedRectangle(D2D1::RoundedRect(focus, radius, radius), brush_.get(), 1.0f);
     }
 
@@ -652,12 +667,12 @@ void StripWindow::draw_chevron() noexcept {
         const float h = static_cast<float>(px(11));
         const D2D1_RECT_F bg{cx - h, cy - h, cx + h, cy + h};
         const float radius = static_cast<float>(px(settings_.corner_radius));
-        brush_->SetColor(colour(theme_.text, theme_.dark ? hover_alpha_dark : hover_alpha_light));
+        brush_->SetColor(d2d_colour(theme_.text, theme_.dark ? hover_alpha_dark : hover_alpha_light));
         target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
     }
     const float w = static_cast<float>(px(4));
     const float stroke = (std::max)(1.0f, static_cast<float>(dpi_) / 96.0f * 1.5f);
-    brush_->SetColor(colour(blend(theme_.text, surface_, 0.8f)));
+    brush_->SetColor(d2d_colour(blend(theme_.text, surface_, 0.8f)));
     target_->DrawLine(D2D1::Point2F(cx - w, cy - w / 2.0f), D2D1::Point2F(cx, cy + w / 2.0f), brush_.get(), stroke);
     target_->DrawLine(D2D1::Point2F(cx, cy + w / 2.0f), D2D1::Point2F(cx + w, cy - w / 2.0f), brush_.get(), stroke);
 }

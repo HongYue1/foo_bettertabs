@@ -75,6 +75,14 @@ enum StyleCommand : unsigned {
     style_align_end,
     style_show_always,
     style_show_two_or_more,
+    style_strength_auto,
+    style_strength_subtle,
+    style_strength_medium,
+    style_strength_strong,
+    style_strength_solid,
+    style_background_theme,
+    style_background_tint,
+    style_background_custom,
     style_last,
 };
 constexpr LONG limit_cap = MAXSHORT;
@@ -1014,16 +1022,34 @@ void TabsContainer::refresh_appearance() noexcept {
 void TabsContainer::refresh_colours() noexcept {
     try {
         const cui::colours::helper colours(guids::colour_client);
+        const COLORREF panel = colours.get_colour(cui::colours::colour_background);
         StripTheme theme;
-        theme.background = colours.get_colour(cui::colours::colour_background);
+        theme.background = panel;
         theme.text = colours.get_colour(cui::colours::colour_text);
         theme.dark = colours.is_dark_mode_active();
+        theme.active_fill = static_cast<float>(settings_.accent_strength) / 100.0f;
+
+        // The strip's own background: Columns UI's (lifted in dark mode by the strip), a custom
+        // colour, or the panel with some accent mixed in. Light or dark follows what is drawn.
+        std::uint32_t bg = colour::rgb_from_colorref(panel);
+        if (settings_.strip_background == StripBackground::custom) {
+            bg = settings_.background_argb & 0xFFFFFFu;
+            theme.lift = false;
+            theme.dark = colour::lightness(bg) < colour::light_background_lightness;
+        }
+        const auto mix = [](std::uint32_t a, std::uint32_t b, float t) {
+            const auto ch = [&](int shift) {
+                const float x = static_cast<float>((a >> shift) & 0xFFu);
+                const float y = static_cast<float>((b >> shift) & 0xFFu);
+                return static_cast<std::uint32_t>(std::lround(x * t + y * (1.0f - t))) << shift;
+            };
+            return ch(16) | ch(8) | ch(0);
+        };
 
         // Every accent passes a 3:1 contrast floor against the strip. A cover colour is raw, so
-        // it also gets the full legibility treatment (lightness window, chroma floor; same as
-        // Media Bar). Columns UI's selection colour and a custom colour are the user's choice
-        // and are only nudged when they would vanish.
-        const std::uint32_t bg = colour::rgb_from_colorref(theme.background);
+        // it also gets the full legibility treatment (lightness window, chroma floor; the same
+        // code as Media Bar and foo_osd). Columns UI's selection colour and a custom colour are
+        // the user's choice and are only nudged when they would vanish.
         std::uint32_t accent = colour::rgb_from_colorref(colours.get_colour(cui::colours::colour_selection_background));
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
         if (settings_.accent_source == AccentSource::cover) {
@@ -1031,9 +1057,25 @@ void TabsContainer::refresh_colours() noexcept {
                 accent = colour::accent_for_background(*raw, bg);
             }
         }
-        theme.accent = colour::colorref_from_rgb(colour::with_min_contrast(accent, bg, colour::accent_min_contrast));
+        accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
 
-        background_ = theme.background;
+        if (settings_.strip_background == StripBackground::accent_tint) {
+            // Tint what the strip would have shown (dark mode's lift included), then make sure
+            // the accent still stands out from its own tint.
+            const std::uint32_t text = colour::rgb_from_colorref(theme.text);
+            const std::uint32_t base = theme.dark ? mix(text, bg, 0.04f) : bg;
+            bg = mix(accent, base, static_cast<float>(settings_.tint_strength) / 100.0f);
+            theme.lift = false;
+            accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
+        }
+        if (!theme.lift) {
+            theme.text = colour::colorref_from_rgb(
+                colour::with_min_contrast(colour::rgb_from_colorref(theme.text), bg, 4.5f));
+        }
+        theme.background = colour::colorref_from_rgb(bg);
+        theme.accent = colour::colorref_from_rgb(accent);
+
+        background_ = panel;
         strip_.set_theme(theme);
         if (const HWND self = get_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
     } catch (...) {
@@ -1455,6 +1497,25 @@ void TabsContainer::append_style_menu(HMENU menu) const noexcept {
         radio(m, style_accent_cover, L"From the playing cover", s.accent_source == AccentSource::cover);
         radio(m, style_accent_custom, L"Custom...", s.accent_source == AccentSource::custom);
     }
+    if (HMENU m = sub(L"Accent strength"); m != nullptr) {
+        // Opacity of the active tab's fill; the underline is always solid.
+        const UINT grey = s.indicator == Indicator::pill || s.chip ? 0 : MF_GRAYED;
+        const auto level = [&](unsigned id, const wchar_t* text, bool on) {
+            radio(m, id, text, on);
+            if (grey != 0) EnableMenuItem(m, id, MF_BYCOMMAND | MF_GRAYED);
+        };
+        const std::uint8_t a = s.accent_strength;
+        level(style_strength_auto, L"Automatic", a == 0);
+        level(style_strength_subtle, L"Subtle (15%)", a == 15);
+        level(style_strength_medium, L"Medium (35%)", a == 35);
+        level(style_strength_strong, L"Strong (60%)", a == 60);
+        level(style_strength_solid, L"Solid", a == 100);
+    }
+    if (HMENU m = sub(L"Strip background"); m != nullptr) {
+        radio(m, style_background_theme, L"Columns UI background", s.strip_background == StripBackground::theme);
+        radio(m, style_background_tint, L"Tinted with the accent", s.strip_background == StripBackground::accent_tint);
+        radio(m, style_background_custom, L"Custom...", s.strip_background == StripBackground::custom);
+    }
     if (HMENU m = sub(L"Tab width"); m != nullptr) {
         radio(m, style_sizing_fit, L"Fit the title", s.sizing == TabSizing::fit);
         radio(m, style_sizing_equal, L"All equal", s.sizing == TabSizing::equal);
@@ -1477,6 +1538,23 @@ void TabsContainer::append_style_menu(HMENU menu) const noexcept {
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(style), L"Appearance");
 }
 
+namespace {
+
+//! The system colour picker, seeded with and writing back 0xAARRGGBB. False if cancelled.
+bool pick_colour(std::uint32_t& argb) noexcept {
+    static COLORREF custom_colours[16]{};
+    CHOOSECOLORW cc{sizeof(cc)};
+    cc.hwndOwner = core_api::get_main_window();
+    cc.rgbResult = colour::colorref_from_rgb(argb & 0xFFFFFFu);
+    cc.lpCustColors = custom_colours;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN;
+    if (!ChooseColorW(&cc)) return false;
+    argb = 0xFF000000u | colour::rgb_from_colorref(cc.rgbResult);
+    return true;
+}
+
+} // namespace
+
 void TabsContainer::run_style_command(unsigned command) noexcept {
     Settings& s = settings_;
     switch (command) {
@@ -1494,15 +1572,20 @@ void TabsContainer::run_style_command(unsigned command) noexcept {
     case style_accent_selection: s.accent_source = AccentSource::selection; break;
     case style_accent_cover: s.accent_source = AccentSource::cover; break;
     case style_accent_custom: {
-        static COLORREF custom_colours[16]{};
-        CHOOSECOLORW cc{sizeof(cc)};
-        cc.hwndOwner = core_api::get_main_window();
-        cc.rgbResult = colour::colorref_from_rgb(s.accent_argb & 0xFFFFFFu);
-        cc.lpCustColors = custom_colours;
-        cc.Flags = CC_RGBINIT | CC_FULLOPEN;
-        if (!ChooseColorW(&cc)) return;
-        s.accent_argb = 0xFF000000u | colour::rgb_from_colorref(cc.rgbResult);
+        if (!pick_colour(s.accent_argb)) return;
         s.accent_source = AccentSource::custom;
+        break;
+    }
+    case style_strength_auto: s.accent_strength = 0; break;
+    case style_strength_subtle: s.accent_strength = 15; break;
+    case style_strength_medium: s.accent_strength = 35; break;
+    case style_strength_strong: s.accent_strength = 60; break;
+    case style_strength_solid: s.accent_strength = 100; break;
+    case style_background_theme: s.strip_background = StripBackground::theme; break;
+    case style_background_tint: s.strip_background = StripBackground::accent_tint; break;
+    case style_background_custom: {
+        if (!pick_colour(s.background_argb)) return;
+        s.strip_background = StripBackground::custom;
         break;
     }
     case style_sizing_fit: s.sizing = TabSizing::fit; break;

@@ -34,6 +34,11 @@ struct StripTheme {
     //! Already made legible against the background by the host.
     COLORREF accent{RGB(0, 120, 215)};
     bool dark{false};
+    //! Lift the strip slightly off a dark background (the Columns UI background only; a custom
+    //! or tinted strip background is used as given).
+    bool lift{true};
+    //! Opacity of the active tab's accent fill (pill, chip), 0 = the automatic look.
+    float active_fill{0.0f};
     [[nodiscard]] bool operator==(const StripTheme&) const = default;
 };
 

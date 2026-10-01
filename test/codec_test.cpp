@@ -52,6 +52,10 @@ Settings odd_settings() {
     s.linger_ms = 1200;
     s.reveal_mode = RevealMode::push;
     s.show_hide_animation = ShowHideAnimation::fade;
+    s.accent_strength = 60;
+    s.strip_background = StripBackground::accent_tint;
+    s.background_argb = 0xFF332211u;
+    s.tint_strength = 20;
     return s;
 }
 

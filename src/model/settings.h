@@ -15,6 +15,7 @@ enum class TabAlign : std::uint8_t { start, centre, end };
 enum class StripVisibility : std::uint8_t { always, never, two_or_more, auto_hide };
 enum class Indicator : std::uint8_t { underline, pill, none };
 enum class AccentSource : std::uint8_t { selection, custom, cover };
+enum class StripBackground : std::uint8_t { theme, custom, accent_tint };
 enum class MiddleClick : std::uint8_t { nothing, hide_tab, remove_tab };
 enum class RevealMode : std::uint8_t { overlay, push };
 enum class ShowHideAnimation : std::uint8_t { none, slide, fade };
@@ -40,6 +41,13 @@ struct Settings {
     AccentSource accent_source{AccentSource::selection};
     //! 0xAARRGGBB, used when accent_source == custom.
     std::uint32_t accent_argb{0xFF3EA6FFu};
+    //! Opacity of the active tab's accent fill (pill, chip) in percent; 0 = automatic.
+    std::uint8_t accent_strength{0};
+    StripBackground strip_background{StripBackground::theme};
+    //! 0xAARRGGBB, used when strip_background == custom.
+    std::uint32_t background_argb{0xFF202020u};
+    //! How much accent goes into an accent-tinted strip, in percent.
+    std::uint8_t tint_strength{12};
     std::uint16_t corner_radius{4};
     bool chip{false};
     bool animations{false};

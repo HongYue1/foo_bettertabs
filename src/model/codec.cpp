@@ -20,6 +20,8 @@ void clamp(Settings& s) noexcept {
     limit(s.reveal_delay_ms, 0, 5000);
     limit(s.hide_delay_ms, 0, 5000);
     limit(s.linger_ms, 0, 5000);
+    if (s.accent_strength != 0) s.accent_strength = std::clamp<std::uint8_t>(s.accent_strength, 5, 100);
+    s.tint_strength = std::clamp<std::uint8_t>(s.tint_strength, 2, 60);
 }
 
 namespace {
@@ -157,6 +159,9 @@ void read_enum(std::span<const std::uint8_t> v, E& out, E last) noexcept {
 void read_bool(std::span<const std::uint8_t> v, bool& out) noexcept {
     if (!v.empty()) out = v[0] != 0;
 }
+void read_u8(std::span<const std::uint8_t> v, std::uint8_t& out) noexcept {
+    if (!v.empty()) out = v[0];
+}
 void read_u16(std::span<const std::uint8_t> v, std::uint16_t& out) noexcept {
     if (v.size() >= 2) out = static_cast<std::uint16_t>(read_uint(v.first(2)));
 }
@@ -195,6 +200,10 @@ enum SettingId : std::uint16_t {
     s_linger = 27,
     s_reveal_mode = 28,
     s_show_hide_animation = 29,
+    s_accent_strength = 30,
+    s_strip_background = 31,
+    s_background_argb = 32,
+    s_tint_strength = 33,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -227,6 +236,10 @@ void write_settings(Writer& w, const Settings& s) {
     field_u16(w, s_linger, s.linger_ms);
     field_u8(w, s_reveal_mode, static_cast<std::uint8_t>(s.reveal_mode));
     field_u8(w, s_show_hide_animation, static_cast<std::uint8_t>(s.show_hide_animation));
+    field_u8(w, s_accent_strength, s.accent_strength);
+    field_u8(w, s_strip_background, static_cast<std::uint8_t>(s.strip_background));
+    field_u32(w, s_background_argb, s.background_argb);
+    field_u8(w, s_tint_strength, s.tint_strength);
 }
 
 //! Returns false for an id this build does not know.
@@ -263,6 +276,10 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_show_hide_animation:
         read_enum(v, s.show_hide_animation, ShowHideAnimation::fade);
         return true;
+    case s_accent_strength: read_u8(v, s.accent_strength); return true;
+    case s_strip_background: read_enum(v, s.strip_background, StripBackground::accent_tint); return true;
+    case s_background_argb: read_u32(v, s.background_argb); return true;
+    case s_tint_strength: read_u8(v, s.tint_strength); return true;
     default: return false;
     }
 }

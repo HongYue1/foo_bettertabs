@@ -180,6 +180,10 @@ to `user-components\foo_bettertabs\` for 32-bit) and restart foobar2000.
 Settings are stored in a versioned format that keeps fields it does not know, so adding an option
 does not break an existing layout.
 
+## See also
+
+- [foo_osd](https://github.com/HongYue1/foo_osd): Highly customizable On-Screen Display for foobar2000.
+
 ## License
 
 [MIT](LICENSE)

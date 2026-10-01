@@ -573,3 +573,8 @@ To add once verified in a build (AGENTS.md: verify before writing):
 - Fallbacks: Windows 7 or a refused layered child gives push with a reserved hot zone; the owned
   popup overlay planned in Q2 is not implemented yet. Animations run only over the panel.
 - Step 2 (pending): indicator slide and strip cross-fade (the `animations` setting).
+- User test of beta 1: everything passed. Hiding the layered strip over the panel always
+  invalidates the panel ("panel invalidated" on every hide, overlay and push), so the section 10
+  question is answered: yes, it does.
+- 0.4.0 beta 2: defaults changed at the user's request: slide animation, 6 DIP hot zone (new
+  instances; stored instances keep their values).

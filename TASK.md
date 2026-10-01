@@ -25,12 +25,11 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   DirectWrite; fixed and warmed on a worker. Confirmed: own time 155 -> 18 ms, startup 0.536 ->
   0.225 s.
 - **0.4.0 beta 1** (M(d) step 1): auto-hide (PLAN.md section 14, "0.4.0 beta 1"). Built x64 +
-  Win32, 0 warnings, tests pass, 0 dialog problems.
+  Win32, 0 warnings, tests pass, 0 dialog problems. Confirmed by the user. Beta 2: defaults slide
+  animation and 6 DIP hot zone.
 
 ## Waiting for
 
-- The user's 0.4.0 beta 1 auto-hide test, including the perf line "auto-hide: strip hidden ...
-  panel invalidated / not invalidated" (answers the layered-child question in PLAN.md section 10).
 - Optional: the 16.9 ms still in "after WM_CREATE" of the first container (not chased).
 - Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
 

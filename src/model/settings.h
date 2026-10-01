@@ -74,12 +74,12 @@ struct Settings {
     std::uint16_t max_tab_width{240};
 
     // Auto-hide.
-    std::uint16_t hot_zone{4};
+    std::uint16_t hot_zone{6};
     std::uint16_t reveal_delay_ms{0};
     std::uint16_t hide_delay_ms{400};
     std::uint16_t linger_ms{700};
     RevealMode reveal_mode{RevealMode::overlay};
-    ShowHideAnimation show_hide_animation{ShowHideAnimation::none};
+    ShowHideAnimation show_hide_animation{ShowHideAnimation::slide};
 
     [[nodiscard]] bool operator==(const Settings&) const = default;
 };

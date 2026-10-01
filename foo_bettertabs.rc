@@ -139,19 +139,21 @@ BEGIN
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
     LTEXT           "Show the strip:",IDC_STATIC,12,23,84,8
     COMBOBOX        IDC_VISIBILITY,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Animate switches",IDC_SWITCH_ANIM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,38,84,10
+    EDITTEXT        IDC_SWITCH_MS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms, slide and cross-fade (50-1000)",IDC_STATIC,131,39,162,8
 
-    LTEXT           "Mouse and keyboard",IDC_STATIC,7,45,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,55,286,1
-    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,62,281,10
-    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,76,281,10
-    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,90,281,10
-    LTEXT           "Middle click:",IDC_STATIC,12,106,84,8
-    COMBOBOX        IDC_MIDDLE,99,104,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Mouse and keyboard",IDC_STATIC,7,57,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,67,286,1
+    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,74,281,10
+    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,88,281,10
+    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,102,281,10
+    LTEXT           "Middle click:",IDC_STATIC,12,118,84,8
+    COMBOBOX        IDC_MIDDLE,99,116,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    LTEXT           "Panels",IDC_STATIC,7,128,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,138,286,1
-    CONTROL         "Create a panel only when its tab is first shown",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,145,281,10
-    LTEXT           "Faster startup. Switching it off creates every panel up front.",IDC_STATIC,22,157,271,8
+    LTEXT           "Panels",IDC_STATIC,7,138,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,148,286,1
+    CONTROL         "Create a panel only when its tab is first shown (faster startup)",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,155,281,10
     CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,169,281,10
     CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,183,281,10
 END

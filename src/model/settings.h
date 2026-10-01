@@ -52,8 +52,12 @@ struct Settings {
     std::uint8_t tint_strength{12};
     std::uint16_t corner_radius{4};
     bool chip{false};
-    bool animations{false};
+    //! Tab switches animate: the indicator slides, the two tabs' colours cross-fade.
+    bool animations{true};
+    //! Length of the auto-hide show/hide animation.
     std::uint16_t animation_ms{150};
+    //! Length of the tab switch animation.
+    std::uint16_t switch_ms{150};
 
     bool wheel_cycles{true};
     MiddleClick middle_click{MiddleClick::nothing};

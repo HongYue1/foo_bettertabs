@@ -70,6 +70,8 @@
 #define IDC_LAZY 1074
 #define IDC_REMEMBER 1075
 #define IDC_ICONS_ONLY 1076
+#define IDC_SWITCH_ANIM 1077
+#define IDC_SWITCH_MS 1078
 
 // Auto-hide
 #define IDC_AH_MODE 1080

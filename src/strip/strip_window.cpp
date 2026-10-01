@@ -27,6 +27,7 @@ namespace {
 constexpr wchar_t class_name[] = L"foo_bettertabs_strip";
 constexpr UINT wm_dpichanged_afterparent = 0x02E3;
 constexpr float wide_layout = 100000.0f;
+constexpr UINT_PTR switch_timer = 0xB710;
 
 [[nodiscard]] HINSTANCE module_instance() noexcept {
     return reinterpret_cast<HINSTANCE>(&__ImageBase);
@@ -194,6 +195,7 @@ void StripWindow::destroy() noexcept {
 
 void StripWindow::set_settings(const Settings& settings) noexcept {
     if (settings == settings_) return;
+    stop_switch();
     settings_ = settings;
     update_thickness();
     relayout();
@@ -254,6 +256,7 @@ bool StripWindow::make_layout(IDWriteTextFormat* format, const std::wstring& tex
 }
 
 void StripWindow::set_font(const StripFont& font) noexcept {
+    stop_switch();
     font_ = font;
     font_set_ = true;
     rebuild_text_format();
@@ -265,6 +268,7 @@ void StripWindow::set_font(const StripFont& font) noexcept {
 
 void StripWindow::set_items(std::span<const StripItem> items, std::size_t active) noexcept {
     if (dragging_) end_drag(false);
+    stop_switch();
     try {
         if (items_.size() != items.size()) items_.resize(items.size());
         for (std::size_t i = 0; i < items.size(); ++i) {
@@ -297,6 +301,7 @@ void StripWindow::set_active(std::size_t active) noexcept {
     if (active >= items_.size()) active = no_index;
     if (active == active_) return;
     const std::size_t old = active_;
+    stop_switch();
     active_ = active;
     if (layout_.overflow && active != no_index && (active < layout_.first || active >= layout_.last)) {
         // The visible window of tabs has to move.
@@ -306,6 +311,118 @@ void StripWindow::set_active(std::size_t active) noexcept {
     }
     invalidate_tab(old);
     invalidate_tab(active);
+    if (settings_.animations && wnd_ != nullptr && !dragging_ && old != no_index && active != no_index &&
+        IsWindowVisible(wnd_) != FALSE) {
+        const RECT a = tab_rect(old);
+        const RECT b = tab_rect(active);
+        if (IsRectEmpty(&a) == FALSE && IsRectEmpty(&b) == FALSE) start_switch(old);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tab switch animation.
+
+void StripWindow::start_switch(std::size_t from) noexcept {
+    switch_from_ = from;
+    switch_start_ = perf::now();
+    switch_t_ = 0.0f;
+    switching_ = true;
+    if (SetTimer(wnd_, switch_timer, USER_TIMER_MINIMUM, nullptr) == 0) {
+        stop_switch();
+        return;
+    }
+    const RECT r = switch_rect();
+    InvalidateRect(wnd_, &r, FALSE);
+}
+
+void StripWindow::stop_switch() noexcept {
+    if (!switching_) return;
+    const RECT r = switch_rect();
+    switching_ = false;
+    switch_from_ = no_index;
+    switch_t_ = 1.0f;
+    if (wnd_ == nullptr) return;
+    KillTimer(wnd_, switch_timer);
+    if (IsRectEmpty(&r) == FALSE) InvalidateRect(wnd_, &r, FALSE);
+}
+
+void StripWindow::on_switch_timer() noexcept {
+    if (!switching_) {
+        KillTimer(wnd_, switch_timer);
+        return;
+    }
+    const RECT r = switch_rect();
+    if (IsRectEmpty(&r) != FALSE) {
+        // A tab went out of view mid-way: just show the end state.
+        stop_switch();
+        InvalidateRect(wnd_, nullptr, FALSE);
+        return;
+    }
+    const double length = static_cast<double>((std::max)(std::uint16_t{1}, settings_.switch_ms));
+    const float p = static_cast<float>(std::clamp(perf::elapsed_ms(switch_start_, perf::now()) / length, 0.0, 1.0));
+    const float rest = 1.0f - p;
+    switch_t_ = 1.0f - rest * rest * rest; // ease-out cubic
+    InvalidateRect(wnd_, &r, FALSE);
+    if (p >= 1.0f) stop_switch();
+}
+
+RECT StripWindow::switch_rect() const noexcept {
+    const RECT a = tab_rect(switch_from_);
+    const RECT b = tab_rect(active_);
+    if (IsRectEmpty(&a) != FALSE || IsRectEmpty(&b) != FALSE) return RECT{};
+    RECT u{};
+    UnionRect(&u, &a, &b);
+    return u;
+}
+
+float StripWindow::active_fill_alpha() const noexcept {
+    if (theme_.active_fill > 0.0f) return theme_.active_fill;
+    if (settings_.indicator == Indicator::pill) return theme_.dark ? pill_alpha_dark : pill_alpha_light;
+    return chip_active_alpha;
+}
+
+void StripWindow::draw_switch_indicator() noexcept {
+    const RECT a = tab_rect(switch_from_);
+    const RECT b = tab_rect(active_);
+    if (IsRectEmpty(&a) != FALSE || IsRectEmpty(&b) != FALSE) return;
+    const float t = switch_t_;
+    const auto mix = [t](LONG from, LONG to) {
+        return static_cast<float>(from) + (static_cast<float>(to) - static_cast<float>(from)) * t;
+    };
+    // Client pixels (render() has set the translation). The tab's long side runs along the strip.
+    const D2D1_RECT_F r{mix(a.left, b.left), mix(a.top, b.top), mix(a.right, b.right), mix(a.bottom, b.bottom)};
+    const bool along_x = horizontal();
+    const float inset_along = static_cast<float>((std::max)(1, px(1)));
+    const float inset_across = static_cast<float>((std::max)(2, px(3)));
+    const float radius = static_cast<float>(px(settings_.corner_radius));
+
+    if (settings_.indicator == Indicator::pill || settings_.chip) {
+        D2D1_RECT_F bg = r;
+        const float ix = along_x ? inset_along : inset_across;
+        const float iy = along_x ? inset_across : inset_along;
+        bg.left += ix;
+        bg.right -= ix;
+        bg.top += iy;
+        bg.bottom -= iy;
+        const float alpha = active_fill_alpha();
+        brush_->SetColor(d2d_colour(accent_fill_colour(theme_, alpha), alpha));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(bg, radius, radius), brush_.get());
+    }
+    if (settings_.indicator == Indicator::underline) {
+        const float bar = static_cast<float>((std::max)(2, px(2)));
+        const float text_inset = static_cast<float>(px(settings_.pad_x)) * 0.5f;
+        // Upright side tabs inset the bar like draw_tab does; rotated ones like a top strip.
+        const float side_inset = rotated() ? text_inset : inset_along * 2.0f;
+        D2D1_RECT_F u = r;
+        switch (settings_.position) {
+        case StripPosition::top: u = {r.left + text_inset, r.bottom - bar, r.right - text_inset, r.bottom}; break;
+        case StripPosition::bottom: u = {r.left + text_inset, r.top, r.right - text_inset, r.top + bar}; break;
+        case StripPosition::left: u = {r.right - bar, r.top + side_inset, r.right, r.bottom - side_inset}; break;
+        case StripPosition::right: u = {r.left, r.top + side_inset, r.left + bar, r.bottom - side_inset}; break;
+        }
+        brush_->SetColor(d2d_colour(theme_.accent));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(u, bar / 2.0f, bar / 2.0f), brush_.get());
+    }
 }
 
 void StripWindow::take_paint_stats(perf::PaintStats& out) noexcept {
@@ -684,6 +801,7 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
     target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
     target_->SetTextAntialiasMode(text_antialias());
     target_->Clear(d2d_colour(surface_));
+    if (switching_) draw_switch_indicator();
 
     for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
         const RECT r = tab_rect(i);
@@ -708,6 +826,14 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     const RECT r = tab_rect(index);
     const bool active = index == active_;
     const bool hover = index == hover_;
+    // While switching, the moving indicator carries the active look (draw_switch_indicator) and
+    // the two tabs blend their colours by `weight`.
+    const bool active_look = active && !switching_;
+    float weight = active ? 1.0f : 0.0f;
+    if (switching_) {
+        if (index == active_) weight = switch_t_;
+        else if (index == switch_from_) weight = 1.0f - switch_t_;
+    }
     const D2D1::Matrix3x2F base = D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_);
 
     // Work in a "frame": the tab as a horizontal rectangle, plus the edge facing the panel.
@@ -755,13 +881,10 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     // drawn on top keeps ClearType.
     float fill_alpha = 0.0f;
     COLORREF fill = theme_.text;
-    const bool accent_fill = active && (settings_.indicator == Indicator::pill || settings_.chip);
-    if (active && settings_.indicator == Indicator::pill) {
+    const bool accent_fill = active_look && (settings_.indicator == Indicator::pill || settings_.chip);
+    if (accent_fill) {
         fill = theme_.accent;
-        fill_alpha = theme_.active_fill > 0.0f ? theme_.active_fill : (theme_.dark ? pill_alpha_dark : pill_alpha_light);
-    } else if (active && settings_.chip) {
-        fill = theme_.accent;
-        fill_alpha = theme_.active_fill > 0.0f ? theme_.active_fill : chip_active_alpha;
+        fill_alpha = active_fill_alpha();
     } else if (hover) {
         fill_alpha = (theme_.dark ? hover_alpha_dark : hover_alpha_light) + (settings_.chip ? chip_alpha : 0.0f);
     } else if (settings_.chip) {
@@ -774,7 +897,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     }
 
     const int pad_x = px(settings_.pad_x);
-    if (active && settings_.indicator == Indicator::underline) {
+    if (active_look && settings_.indicator == Indicator::underline) {
         const float bar = static_cast<float>((std::max)(2, px(2)));
         D2D1_RECT_F u = f;
         const float along_inset = static_cast<float>(pad_x) * 0.5f;
@@ -796,7 +919,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - static_cast<float>(content)) / 2.0f));
         }
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
-        COLORREF text = active || hover ? theme_.text : blend(theme_.text, surface_, inactive_text);
+        COLORREF text = hover ? theme_.text : blend(theme_.text, blend(theme_.text, surface_, inactive_text), weight);
         if (accent_fill && fill_alpha >= strong_fill) {
             // A strong accent fill: keep the theme's text if it still reads, else white or black.
             const std::uint32_t under = colour::rgb_from_colorref(blend(fill, surface_, fill_alpha));
@@ -810,7 +933,8 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
         if (item.icon_layout) {
             // The active tab's icon carries the accent unless a fill already does.
-            const COLORREF icon = active && !accent_fill && settings_.indicator != Indicator::none ? theme_.accent : text;
+            const bool accent_icon = settings_.indicator == Indicator::underline && !settings_.chip;
+            const COLORREF icon = accent_icon && weight > 0.0f ? blend(theme_.accent, text, weight) : text;
             const float iy = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.icon_height)) / 2.0f);
             brush_->SetColor(d2d_colour(icon));
             target_->DrawTextLayout(D2D1::Point2F(x, iy), item.icon_layout.get(), brush_.get(), draw_text_options_);
@@ -882,6 +1006,8 @@ LRESULT CALLBACK StripWindow::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM 
         self->tip_index_ = no_index;
         self->press_index_ = no_index;
         self->dragging_ = false;
+        self->switching_ = false; // the timer died with the window
+        self->switch_from_ = no_index;
         return DefWindowProcW(wnd, msg, wp, lp);
     }
     return self->on_message(msg, wp, lp);
@@ -896,6 +1022,12 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
         return 0;
     }
     case WM_ERASEBKGND: return 1;
+    case WM_TIMER:
+        if (wp == switch_timer) {
+            on_switch_timer();
+            return 0;
+        }
+        break;
     case WM_PAINT: on_paint(); return 0;
     case WM_SIZE: on_size(LOWORD(lp), HIWORD(lp)); return 0;
     case WM_MOUSEMOVE: on_mouse_move(POINT{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}); return 0;
@@ -1060,6 +1192,7 @@ void StripWindow::on_mouse_move(POINT pt) noexcept {
             const int dy = GetSystemMetrics(SM_CYDRAG);
             if (std::abs(pt.x - press_pt_.x) > dx || std::abs(pt.y - press_pt_.y) > dy) {
                 dragging_ = true;
+                stop_switch();
                 drag_origin_ = press_index_;
                 drag_index_ = press_index_;
                 if (tooltip_ != nullptr) SendMessageW(tooltip_, TTM_POP, 0, 0);

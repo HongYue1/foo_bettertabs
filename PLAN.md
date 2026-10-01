@@ -578,3 +578,16 @@ To add once verified in a build (AGENTS.md: verify before writing):
   question is answered: yes, it does.
 - 0.4.0 beta 2: defaults changed at the user's request: slide animation, 6 DIP hot zone (new
   instances; stored instances keep their values).
+
+### 0.4.0 beta 3 (M(d) step 2: tab switch animation)
+
+- Behaviour page: "Animate switches" (`animations`, id 15, now on by default) + length
+  (`switch_ms`, new id 37, 150 ms, 50-1000). `animation_ms` (id 16) stays the auto-hide
+  show/hide length. The lazy-panels hint went into its checkbox text to make room.
+- `StripWindow::set_active` starts it only when both tabs are on screen, the strip is visible and
+  no drag runs (an overflow scroll, set_items, set_settings, set_font or a drag stops it). One
+  strip timer (USER_TIMER_MINIMUM), ease-out cubic, repaints only the union of the two tabs.
+- While it runs, `draw_switch_indicator` draws the pill/chip fill and/or underline at the
+  interpolated rect before the tabs (so text stays on top, ClearType kept); the two tabs skip their
+  own active look and blend text and icon colours by the eased weight. "Cross-fade" is that colour
+  blend: only the strip animates, panels switch at once. Off costs one bool test per paint.

@@ -17,6 +17,7 @@ void clamp(Settings& s) noexcept {
     limit(s.corner_radius, 0, 32);
     limit(s.max_tab_width, 0, 2000);
     limit(s.animation_ms, 50, 1000);
+    limit(s.switch_ms, 50, 1000);
     limit(s.hot_zone, 1, 32);
     limit(s.reveal_delay_ms, 0, 5000);
     limit(s.hide_delay_ms, 0, 5000);
@@ -208,6 +209,7 @@ enum SettingId : std::uint16_t {
     s_icons_only = 34,
     s_ctrl_tab = 35,
     s_max_tab_width = 36,
+    s_switch_ms = 37,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -247,6 +249,7 @@ void write_settings(Writer& w, const Settings& s) {
     field_u8(w, s_icons_only, s.icons_only ? 1 : 0);
     field_u8(w, s_ctrl_tab, s.ctrl_tab ? 1 : 0);
     field_u16(w, s_max_tab_width, s.max_tab_width);
+    field_u16(w, s_switch_ms, s.switch_ms);
 }
 
 //! Returns false for an id this build does not know.
@@ -290,6 +293,7 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_icons_only: read_bool(v, s.icons_only); return true;
     case s_ctrl_tab: read_bool(v, s.ctrl_tab); return true;
     case s_max_tab_width: read_u16(v, s.max_tab_width); return true;
+    case s_switch_ms: read_u16(v, s.switch_ms); return true;
     default: return false;
     }
 }

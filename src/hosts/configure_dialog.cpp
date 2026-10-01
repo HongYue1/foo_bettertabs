@@ -486,6 +486,8 @@ void ConfigureDialog::settings_to_controls() {
     check(IDC_LAZY, s.lazy_children);
     check(IDC_REMEMBER, s.remember_active);
     check(IDC_ICONS_ONLY, s.icons_only);
+    check(IDC_SWITCH_ANIM, s.animations);
+    set_number(IDC_SWITCH_MS, s.switch_ms);
 
     select(IDC_AH_MODE, static_cast<int>(s.reveal_mode));
     select(IDC_AH_ANIM, static_cast<int>(s.show_hide_animation));
@@ -541,6 +543,8 @@ void ConfigureDialog::settings_from_controls() {
     s.lazy_children = checked(IDC_LAZY);
     s.remember_active = checked(IDC_REMEMBER);
     s.icons_only = checked(IDC_ICONS_ONLY);
+    s.animations = checked(IDC_SWITCH_ANIM);
+    s.switch_ms = number(IDC_SWITCH_MS);
 
     pick(IDC_AH_MODE, s.reveal_mode);
     pick(IDC_AH_ANIM, s.show_hide_animation);
@@ -577,6 +581,8 @@ void ConfigureDialog::update_enabled() {
     const bool tint = s.strip_background == StripBackground::accent_tint;
     enable(IDC_TINT, tint);
     enable(IDC_TINT_VALUE, tint);
+
+    enable(IDC_SWITCH_MS, s.animations);
 
     const bool auto_hide = s.visibility == StripVisibility::auto_hide;
     for (const int id : {IDC_AH_MODE, IDC_AH_ANIM, IDC_AH_HOT_ZONE, IDC_AH_REVEAL, IDC_AH_HIDE, IDC_AH_LINGER}) {

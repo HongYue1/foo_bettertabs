@@ -251,6 +251,17 @@ private:
 
     void draw_tab(std::size_t index) noexcept;
     void draw_chevron() noexcept;
+    //! Opacity of the active tab's accent fill (pill or chip).
+    [[nodiscard]] float active_fill_alpha() const noexcept;
+
+    // Tab switch animation (Settings::animations): the indicator slides from the old tab to the
+    // new one and the two tabs' colours cross-fade. Off, nothing below runs.
+    void start_switch(std::size_t from) noexcept;
+    void stop_switch() noexcept;
+    void on_switch_timer() noexcept;
+    //! Everything the moving indicator crosses: both tabs and the ones between.
+    [[nodiscard]] RECT switch_rect() const noexcept;
+    void draw_switch_indicator() noexcept;
 
     HWND wnd_{nullptr};
     StripListener* listener_{nullptr};
@@ -301,6 +312,12 @@ private:
     bool dragging_{false};
     std::size_t drag_origin_{no_index};
     std::size_t drag_index_{no_index};
+
+    bool switching_{false};
+    std::size_t switch_from_{no_index};
+    std::uint64_t switch_start_{0};
+    //! Eased progress, 0 at the old tab, 1 at the new one.
+    float switch_t_{1.0f};
 
     // One tooltip, one tool: its rectangle follows the hovered tab.
     HWND tooltip_{nullptr};

@@ -37,7 +37,7 @@ Settings odd_settings() {
     s.accent_argb = 0xFF102030u;
     s.corner_radius = 9;
     s.chip = true;
-    s.animations = true;
+    s.animations = false;
     s.animation_ms = 220;
     s.wheel_cycles = false;
     s.middle_click = MiddleClick::hide_tab;
@@ -59,6 +59,7 @@ Settings odd_settings() {
     s.icons_only = true;
     s.ctrl_tab = false;
     s.max_tab_width = 100;
+    s.switch_ms = 300;
     return s;
 }
 

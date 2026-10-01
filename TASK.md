@@ -21,18 +21,23 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   timing, one tab per event, Remove, rotate default, dialog layout. No Columns UI import in the DLL.
 - **0.3.2**: shrink before overflow, Character Map fallback, strip create without throwaway text
   format or tooltip (PLAN.md section 14, "0.3.2"). Built x64 + Win32, tests pass, 0 dialog problems.
+- **0.3.3-0.3.4**: slow first container traced to a false DPI change in the first WM_SIZE plus cold
+  DirectWrite; fixed and warmed on a worker. Confirmed: own time 155 -> 18 ms, startup 0.536 ->
+  0.225 s.
+- **0.4.0 beta 1** (M(d) step 1): auto-hide (PLAN.md section 14, "0.4.0 beta 1"). Built x64 +
+  Win32, 0 warnings, tests pass, 0 dialog problems.
 
 ## Waiting for
 
-- The user's 0.3.4 cold-start line: own time should drop from ~155 ms to a few ms, with "text
-  warm-up NNN ms" (finished on the worker) at the end. If it says "running", the warm-up started
-  too late to finish first; then consider an earlier trigger. Cause and numbers: PLAN.md 14, 0.3.4.
+- The user's 0.4.0 beta 1 auto-hide test, including the perf line "auto-hide: strip hidden ...
+  panel invalidated / not invalidated" (answers the layered-child question in PLAN.md section 10).
+- Optional: the 16.9 ms still in "after WM_CREATE" of the first container (not chased).
 - Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
 
 ## Next
 
-- M(d): auto-hide + animations (an Auto-hide page in the Configure dialog; "Show the strip" gets
-  an auto-hide entry). Then M(e) (user left the order to us: M(d) first).
+- Fixes from the auto-hide test, then M(d) step 2: indicator slide and strip cross-fade. Maybe the
+  Win7 owned-popup overlay. Then M(e) (Default UI container).
 - README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
   semantics, Tab stack host behaviour and is_point_ours, transparent children forward
   WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then

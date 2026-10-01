@@ -548,3 +548,28 @@ To add once verified in a build (AGENTS.md: verify before writing):
   `init_stage_callback` at `before_config_read`; the perf line reports its time or "running".
 - Order: M(d) before M(e). The user is on Columns UI and can test auto-hide at once, and M(e)
   then reuses the finished strip, auto-hide included.
+
+### 0.4.0 beta 1 (M(d) step 1: auto-hide)
+
+- "Show the strip" is Always / Only with two or more tabs / Auto-hide / Never (also a radio in the
+  Appearance menu). New Configure page "Auto-hide" (dialog 106, ids 1080-1086): reveal mode (over
+  the panel / push the panel), animation (none / slide / fade), animation length, hot zone size,
+  show after, hide after, linger after a switch.
+- `src/strip/hot_zone.{h,cpp}`: a thin child along the strip edge, layered at alpha 1 where Windows
+  allows it (8+), else a plain child painted in the strip colour. Reports enter/leave through
+  `TrackMouseEvent` and clicks to `HotZoneListener`; a click reveals at once.
+- Strip: `set_layered`/`set_alpha` (fade), `forget_pointer`/`track_pointer`, `dragging()`, and
+  `StripListener::on_strip_pointer()` on enter, leave, capture change and focus change.
+- Container state machine (`ah_*`): one delay timer (reveal or hide) and one frame timer for the
+  animation (ease-out cubic; slide moves the strip rect, fade changes the alpha). The strip stays
+  shown while pinned: its menu open (`menu_pin_`, which also covers Configure opened from it), a
+  drag, mouse capture, keyboard focus, or the cursor over the strip or hot zone. A user switch
+  (click, Ctrl+Tab, wheel) sets a linger time and reveals a hidden strip.
+- Layout: overlay keeps the whole client area for the panel and raises strip + hot zone above it;
+  push shrinks the panel only while shown. A non-layered hot zone reserves its own room. Columns UI
+  size limits ignore the strip in auto-hide. With perf logging, hiding logs whether the panel was
+  invalidated (`GetUpdateRect`) to answer the "does hiding a layered child invalidate the sibling"
+  question from section 10.
+- Fallbacks: Windows 7 or a refused layered child gives push with a reserved hot zone; the owned
+  popup overlay planned in Q2 is not implemented yet. Animations run only over the panel.
+- Step 2 (pending): indicator slide and strip cross-fade (the `animations` setting).

@@ -34,6 +34,7 @@
 #include "../platform/graphics.h"
 #include "../platform/logging.h"
 #include "../platform/perf.h"
+#include "../strip/hot_zone.h"
 #include "../strip/strip_window.h"
 #include "../version.h"
 #include "configure_dialog.h"
@@ -86,6 +87,7 @@ enum StyleCommand : unsigned {
     style_align_end,
     style_show_always,
     style_show_two_or_more,
+    style_show_auto_hide,
     style_strength_auto,
     style_strength_subtle,
     style_strength_medium,
@@ -97,6 +99,10 @@ enum StyleCommand : unsigned {
     style_last,
 };
 constexpr LONG limit_cap = MAXSHORT;
+
+// Auto-hide timers (PLAN.md 5.4): the component's only timers, and only while something is due.
+constexpr UINT_PTR timer_ah_delay = 0xB701;
+constexpr UINT_PTR timer_ah_frame = 0xB702;
 
 [[nodiscard]] Bytes to_bytes(const pfc::array_t<t_uint8>& data) {
     return Bytes(data.get_ptr(), data.get_ptr() + data.get_size());
@@ -203,6 +209,7 @@ class TabsHost;
 
 class TabsContainer : public uie::container_uie_window_v3_t<uie::splitter_window_v3>,
                       private StripListener,
+                      private HotZoneListener,
                       private cover::Listener,
                       private ConfigureTarget {
 public:
@@ -283,6 +290,31 @@ private:
     void on_strip_metrics_changed() noexcept override;
     void on_strip_middle_click(std::size_t index) noexcept override;
     void on_strip_reorder(std::size_t from, std::size_t to) noexcept override;
+    void on_strip_pointer() noexcept override;
+    // HotZoneListener
+    void on_hot_zone(bool inside, bool clicked) noexcept override;
+
+    // Auto-hide (PLAN.md 5.4) ------------------------------------------------------------------
+    enum class AhTimer : std::uint8_t { none, reveal, hide };
+    [[nodiscard]] bool auto_hide() const noexcept { return settings_.visibility == StripVisibility::auto_hide; }
+    //! Auto-hide drawn over the panel: chosen, and the strip really is a layered child.
+    [[nodiscard]] bool ah_overlay() const noexcept {
+        return auto_hide() && settings_.reveal_mode == RevealMode::overlay && strip_.layered();
+    }
+    //! Creates or drops the hot zone and the layered strip to match the settings.
+    void ah_update_mode() noexcept;
+    [[nodiscard]] bool ah_pointer_or_pinned() const noexcept;
+    //! Decides show/hide from the pointer and the pins; starts or cancels the delay timer.
+    void ah_evaluate() noexcept;
+    void ah_set_shown(bool shown) noexcept;
+    void ah_set_timer(AhTimer kind, unsigned ms) noexcept;
+    void ah_on_timer(UINT_PTR id) noexcept;
+    //! A tab chosen by the user: the strip shows (if hidden) and stays at least linger_ms.
+    void ah_note_switch() noexcept;
+    //! Keeps the strip and hot zone above the panels (a new panel window is created on top).
+    void ah_raise() noexcept;
+    [[nodiscard]] int ah_px(unsigned dip) const noexcept;
+
     // ConfigureTarget
     void preview(const ConfigureState& state) noexcept override;
     // cover::Listener
@@ -356,6 +388,19 @@ private:
     COLORREF background_{RGB(255, 255, 255)};
     bool in_create_{false};
     bool cover_subscribed_{false};
+
+    // Auto-hide state.
+    HotZone hot_zone_;
+    bool ah_shown_{false};
+    AhTimer ah_timer_{AhTimer::none};
+    //! A menu (or a dialog from it) of this strip is open.
+    bool menu_pin_{false};
+    ULONGLONG linger_until_{0};
+    //! Show/hide animation: progress 0 (hidden) to 1 (shown), heading for ah_shown_.
+    bool ah_animating_{false};
+    float ah_progress_{0.0f};
+    float ah_from_{0.0f};
+    ULONGLONG ah_anim_start_{0};
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -992,6 +1037,8 @@ void TabsContainer::activate(Tab* next, bool from_user) noexcept {
         RedrawWindow(self, &content_, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
     }
     strip_.set_active(strip_index_of(next));
+    // A newly created panel window starts on top of the z-order, above the auto-hide windows.
+    if (created && auto_hide()) ah_raise();
 
     if (created) limits_changed();
 
@@ -1002,8 +1049,10 @@ void TabsContainer::activate(Tab* next, bool from_user) noexcept {
         }
         const bool ok = target != nullptr && (target == next->wnd || IsChild(next->wnd, target)) &&
                         (GetWindowLongPtrW(target, GWL_STYLE) & WS_TABSTOP) != 0;
-        SetFocus(ok ? target : strip_.hwnd());
+        // A hidden auto-hide strip must not take the focus: it would pin itself shown.
+        SetFocus(ok ? target : (auto_hide() && !ah_shown_ ? next->wnd : strip_.hwnd()));
     }
+    if (from_user) ah_note_switch();
 
     if (measure && next != nullptr && next->wnd != nullptr && !in_create_) {
         const std::uint64_t t_switched = perf::now();
@@ -1057,8 +1106,8 @@ bool TabsContainer::want_strip() const noexcept {
     switch (settings_.visibility) {
     case StripVisibility::never: return false;
     case StripVisibility::two_or_more: return visible_.size() >= 2;
+    case StripVisibility::auto_hide: return ah_shown_ || ah_animating_;
     case StripVisibility::always:
-    case StripVisibility::auto_hide: // M(d); until then, always shown
     default: return true;
     }
 }
@@ -1069,9 +1118,10 @@ void TabsContainer::layout() noexcept {
     RECT client{};
     GetClientRect(self, &client);
     const bool show = want_strip() && strip_.hwnd() != nullptr;
+    const bool ah = auto_hide() && strip_.hwnd() != nullptr;
     RECT strip_rc{};
     content_ = client;
-    if (show) {
+    if (show || ah) {
         const bool across_height =
             settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
         const int room = across_height ? client.bottom : client.right;
@@ -1096,12 +1146,68 @@ void TabsContainer::layout() noexcept {
         }
     }
 
+    // Auto-hide: over the panel the content keeps the whole client area and the strip slides or
+    // fades as a layered child; pushing shrinks the content only while the strip is shown. The
+    // hot zone lies along the edge while the strip is hidden, over the panel when it is layered,
+    // else in room taken from the panel.
+    RECT hot_rc{};
+    bool hot_show = false;
+    if (ah) {
+        const bool overlay = ah_overlay();
+        const int hz = (std::max)(1, ah_px(settings_.hot_zone));
+        switch (settings_.position) {
+        case StripPosition::top: hot_rc = RECT{0, 0, client.right, hz}; break;
+        case StripPosition::bottom: hot_rc = RECT{0, client.bottom - hz, client.right, client.bottom}; break;
+        case StripPosition::left: hot_rc = RECT{0, 0, hz, client.bottom}; break;
+        case StripPosition::right: hot_rc = RECT{client.right - hz, 0, client.right, client.bottom}; break;
+        }
+        hot_show = hot_zone_.hwnd() != nullptr && !show;
+        if (overlay || !ah_shown_) content_ = client;
+        if (hot_show && !hot_zone_.layered()) {
+            switch (settings_.position) {
+            case StripPosition::top: content_.top = hot_rc.bottom; break;
+            case StripPosition::bottom: content_.bottom = hot_rc.top; break;
+            case StripPosition::left: content_.left = hot_rc.right; break;
+            case StripPosition::right: content_.right = hot_rc.left; break;
+            }
+        }
+        if (overlay && show && ah_animating_) {
+            const float p = ah_progress_;
+            if (settings_.show_hide_animation == ShowHideAnimation::slide) {
+                const bool across_height =
+                    settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
+                const int t = across_height ? strip_rc.bottom - strip_rc.top : strip_rc.right - strip_rc.left;
+                const int off = static_cast<int>(std::lround((1.0f - p) * static_cast<float>(t)));
+                switch (settings_.position) {
+                case StripPosition::top: OffsetRect(&strip_rc, 0, -off); break;
+                case StripPosition::bottom: OffsetRect(&strip_rc, 0, off); break;
+                case StripPosition::left: OffsetRect(&strip_rc, -off, 0); break;
+                case StripPosition::right: OffsetRect(&strip_rc, off, 0); break;
+                }
+            } else {
+                strip_.set_alpha(static_cast<BYTE>(std::lround(255.0f * std::clamp(p, 0.0f, 1.0f))));
+            }
+        } else if (strip_.layered()) {
+            strip_.set_alpha(255);
+        }
+    }
+
+    const bool strip_was_shown = strip_.hwnd() != nullptr && IsWindowVisible(strip_.hwnd());
     WindowMoves moves;
     if (strip_.hwnd() != nullptr) {
         if (show) {
             moves.add(strip_.hwnd(), strip_rc, SWP_SHOWWINDOW);
-        } else if (strip_shown_) {
+        } else if (strip_was_shown) {
+            strip_.forget_pointer();
             moves.add(strip_.hwnd(), strip_rc, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+        }
+    }
+    if (hot_zone_.hwnd() != nullptr) {
+        if (hot_show) {
+            moves.add(hot_zone_.hwnd(), hot_rc, SWP_SHOWWINDOW);
+        } else if (IsWindowVisible(hot_zone_.hwnd())) {
+            hot_zone_.forget_pointer();
+            moves.add(hot_zone_.hwnd(), hot_rc, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
         }
     }
     if (active_ != nullptr && active_->wnd != nullptr && !same_rect(active_->applied, content_)) {
@@ -1109,6 +1215,17 @@ void TabsContainer::layout() noexcept {
         moves.add(active_->wnd, content_, 0);
     }
     moves.apply();
+    if (ah) ah_raise();
+
+    if (ah && strip_was_shown && !show && perf::enabled() && active_ != nullptr && active_->wnd != nullptr) {
+        // PLAN.md 5.4: hiding over the panel must not make the panel repaint. Measured here.
+        RECT dirty{};
+        const bool invalidated = GetUpdateRect(active_->wnd, &dirty, FALSE) != FALSE;
+        pfc::string_formatter f;
+        f << "auto-hide: strip hidden (" << (ah_overlay() ? "over the panel" : "push") << "), panel "
+          << (invalidated ? "invalidated" : "not invalidated");
+        log::info(f.get_ptr());
+    }
 
     if (show != strip_shown_) {
         strip_shown_ = show;
@@ -1131,7 +1248,8 @@ uie::size_limit_t TabsContainer::compute_limits() const noexcept {
     }
     out.max_width = (std::max)(out.max_width, out.min_width);
     out.max_height = (std::max)(out.max_height, out.min_height);
-    if (strip_shown_) {
+    // An auto-hidden strip never counts: showing it must not resize the layout around us.
+    if (strip_shown_ && !auto_hide()) {
         const auto t = static_cast<unsigned>((std::max)(0, strip_.thickness()));
         const bool vertical_stack =
             settings_.position == StripPosition::top || settings_.position == StripPosition::bottom;
@@ -1194,6 +1312,12 @@ LRESULT TabsContainer::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             if ((lp & PRF_ERASEBKGND) != 0) fill_background(reinterpret_cast<HDC>(wp));
             return 0;
         case WM_PAINT: on_paint(wnd); return 0;
+        case WM_TIMER:
+            if (wp == timer_ah_delay || wp == timer_ah_frame) {
+                ah_on_timer(wp);
+                return 0;
+            }
+            break;
         case WM_SETFOCUS:
             if (active_ != nullptr && active_->wnd != nullptr) {
                 SetFocus(active_->wnd);
@@ -1243,6 +1367,7 @@ void TabsContainer::on_create(HWND wnd) noexcept {
         refresh_colours();
         step(3);
         refresh_font();
+        ah_update_mode();
         step(4);
         GetClientRect(wnd, &content_);
         for (auto& tab : tabs_) ensure_object(*tab);
@@ -1298,6 +1423,14 @@ void TabsContainer::on_destroy() noexcept {
     if (active != no_index) saved_active_ = static_cast<std::uint32_t>(active);
     for (auto& tab : tabs_) destroy_tab_window(*tab);
     active_ = nullptr;
+    KillTimer(get_wnd(), timer_ah_delay);
+    KillTimer(get_wnd(), timer_ah_frame);
+    ah_timer_ = AhTimer::none;
+    ah_animating_ = false;
+    ah_shown_ = false;
+    ah_progress_ = 0.0f;
+    menu_pin_ = false;
+    hot_zone_.destroy();
     strip_.destroy();
     strip_shown_ = false;
     if (cover_subscribed_) {
@@ -1395,6 +1528,7 @@ void TabsContainer::refresh_colours() noexcept {
         }
 
         background_ = panel;
+        hot_zone_.set_colour(panel);
         strip_.set_theme(theme);
         if (const HWND self = get_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
     } catch (...) {
@@ -1473,8 +1607,10 @@ void TabsContainer::apply_settings() noexcept {
     strip_.set_settings(settings_);
     update_cover_subscription();
     refresh_colours();
+    ah_update_mode();
     layout();
     limits_changed();
+    ah_evaluate();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1834,10 +1970,19 @@ void TabsContainer::show_tab_menu(std::size_t strip_index, POINT screen, bool wi
 }
 
 void TabsContainer::on_strip_menu(std::size_t index, POINT screen) noexcept {
+    // Pins an auto-hidden strip for the menu and any dialog it opens.
+    menu_pin_ = true;
     show_tab_menu(index != no_index ? index : strip_index_of(active_), screen, index != no_index, true);
+    menu_pin_ = false;
+    ah_evaluate();
 }
 
-void TabsContainer::on_strip_overflow(POINT screen) noexcept { show_tab_menu(no_index, screen, false, false); }
+void TabsContainer::on_strip_overflow(POINT screen) noexcept {
+    menu_pin_ = true;
+    show_tab_menu(no_index, screen, false, false);
+    menu_pin_ = false;
+    ah_evaluate();
+}
 
 void TabsContainer::append_style_menu(HMENU menu) const noexcept {
     HMENU style = CreatePopupMenu();
@@ -1916,6 +2061,7 @@ void TabsContainer::append_style_menu(HMENU menu) const noexcept {
         radio(m, style_show_always, L"Always", s.visibility == StripVisibility::always);
         radio(m, style_show_two_or_more, L"Only with two or more tabs",
               s.visibility == StripVisibility::two_or_more);
+        radio(m, style_show_auto_hide, L"Auto-hide", s.visibility == StripVisibility::auto_hide);
     }
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(style), L"Appearance");
 }
@@ -1978,6 +2124,7 @@ void TabsContainer::run_style_command(unsigned command) noexcept {
     case style_align_end: s.align = TabAlign::end; break;
     case style_show_always: s.visibility = StripVisibility::always; break;
     case style_show_two_or_more: s.visibility = StripVisibility::two_or_more; break;
+    case style_show_auto_hide: s.visibility = StripVisibility::auto_hide; break;
     default: return;
     }
     apply_settings();
@@ -2067,10 +2214,12 @@ void TabsContainer::preview(const ConfigureState& state) noexcept {
                 if (tab_visible(*tab)) ensure_window(*tab);
             }
         }
+        ah_update_mode();
         rebuild_strip();
         ensure_active_valid();
         layout();
         limits_changed();
+        ah_evaluate();
     } catch (const std::exception& e) {
         log::warn(std::string("could not apply the settings: ") + e.what());
     }
@@ -2095,6 +2244,181 @@ void TabsContainer::on_strip_metrics_changed() noexcept {
     refresh_font();
     layout();
     limits_changed();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Auto-hide (PLAN.md 5.4). Event driven: the hot zone and the strip report the pointer
+// (TrackMouseEvent), menus, drags and focus pin it. One delay timer and, while a show/hide
+// animation runs, one frame timer. Nothing runs while idle.
+
+int TabsContainer::ah_px(unsigned dip) const noexcept {
+    const unsigned dpi = get_wnd() != nullptr ? gfx::window_dpi(get_wnd()) : gfx::system_dpi();
+    return MulDiv(static_cast<int>(dip), static_cast<int>(dpi), 96);
+}
+
+void TabsContainer::ah_update_mode() noexcept {
+    const HWND self = get_wnd();
+    if (self == nullptr || strip_.hwnd() == nullptr || !auto_hide()) {
+        if (self != nullptr) {
+            KillTimer(self, timer_ah_delay);
+            KillTimer(self, timer_ah_frame);
+        }
+        ah_timer_ = AhTimer::none;
+        ah_animating_ = false;
+        ah_shown_ = false;
+        ah_progress_ = 0.0f;
+        hot_zone_.destroy();
+        (void)strip_.set_layered(false);
+        return;
+    }
+    // Child layered windows are Windows 8+. Ask for the invisible hot zone there; if Windows
+    // grants it, the strip can be layered too and go over the panel.
+    if (hot_zone_.hwnd() == nullptr) (void)hot_zone_.create(self, *this, gfx::layered_children_supported());
+    hot_zone_.set_colour(background_);
+    const bool want_layered = settings_.reveal_mode == RevealMode::overlay && hot_zone_.layered();
+    if (!strip_.set_layered(want_layered) && want_layered) log::warn("auto-hide: the strip could not be layered; pushing the panel instead");
+    if (settings_.show_hide_animation == ShowHideAnimation::none || !ah_overlay()) {
+        KillTimer(self, timer_ah_frame);
+        ah_animating_ = false;
+        ah_progress_ = ah_shown_ ? 1.0f : 0.0f;
+    }
+}
+
+void TabsContainer::ah_raise() noexcept {
+    const HWND self = get_wnd();
+    if (self == nullptr) return;
+    // Hot zone, then strip, so the strip ends up first; only when something got above them.
+    for (const HWND wnd : {hot_zone_.hwnd(), strip_.hwnd()}) {
+        if (wnd == nullptr || !IsWindowVisible(wnd)) continue;
+        if (GetWindow(self, GW_CHILD) == wnd) continue;
+        SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+}
+
+bool TabsContainer::ah_pointer_or_pinned() const noexcept {
+    const HWND strip = strip_.hwnd();
+    if (menu_pin_ || strip_.dragging()) return true;
+    if (strip != nullptr && (GetCapture() == strip || GetFocus() == strip)) return true;
+    POINT pt{};
+    if (!GetCursorPos(&pt)) return false;
+    for (const HWND wnd : {strip, hot_zone_.hwnd()}) {
+        if (wnd == nullptr || !IsWindowVisible(wnd)) continue;
+        RECT rc{};
+        if (GetWindowRect(wnd, &rc) && PtInRect(&rc, pt)) return true;
+    }
+    return false;
+}
+
+void TabsContainer::ah_set_timer(AhTimer kind, unsigned ms) noexcept {
+    const HWND self = get_wnd();
+    ah_timer_ = kind;
+    if (self == nullptr) return;
+    if (kind == AhTimer::none) {
+        KillTimer(self, timer_ah_delay);
+    } else {
+        SetTimer(self, timer_ah_delay, (std::max)(ms, static_cast<unsigned>(USER_TIMER_MINIMUM)), nullptr);
+    }
+}
+
+void TabsContainer::ah_evaluate() noexcept {
+    if (!auto_hide() || get_wnd() == nullptr || strip_.hwnd() == nullptr) return;
+    if (ah_pointer_or_pinned()) {
+        if (ah_shown_) {
+            if (ah_timer_ == AhTimer::hide) ah_set_timer(AhTimer::none, 0);
+            return;
+        }
+        if (settings_.reveal_delay_ms == 0) {
+            ah_set_timer(AhTimer::none, 0);
+            ah_set_shown(true);
+        } else if (ah_timer_ != AhTimer::reveal) {
+            ah_set_timer(AhTimer::reveal, settings_.reveal_delay_ms);
+        }
+        return;
+    }
+    if (!ah_shown_) {
+        if (ah_timer_ == AhTimer::reveal) ah_set_timer(AhTimer::none, 0);
+        return;
+    }
+    if (ah_timer_ == AhTimer::hide) return;
+    unsigned delay = settings_.hide_delay_ms;
+    const ULONGLONG now = GetTickCount64();
+    if (linger_until_ > now) delay = (std::max)(delay, static_cast<unsigned>(linger_until_ - now));
+    if (delay == 0) {
+        ah_set_timer(AhTimer::none, 0);
+        ah_set_shown(false);
+    } else {
+        ah_set_timer(AhTimer::hide, delay);
+    }
+}
+
+void TabsContainer::ah_set_shown(bool shown) noexcept {
+    const HWND self = get_wnd();
+    if (self == nullptr || shown == ah_shown_) return;
+    ah_shown_ = shown;
+    const bool animate = ah_overlay() && settings_.show_hide_animation != ShowHideAnimation::none;
+    if (animate) {
+        ah_from_ = ah_progress_;
+        ah_anim_start_ = GetTickCount64();
+        ah_animating_ = true;
+        SetTimer(self, timer_ah_frame, USER_TIMER_MINIMUM, nullptr);
+    } else {
+        KillTimer(self, timer_ah_frame);
+        ah_animating_ = false;
+        ah_progress_ = shown ? 1.0f : 0.0f;
+    }
+    layout();
+    if (shown) strip_.track_pointer();
+}
+
+void TabsContainer::ah_on_timer(UINT_PTR id) noexcept {
+    const HWND self = get_wnd();
+    if (self == nullptr) return;
+    if (id == timer_ah_delay) {
+        const AhTimer kind = ah_timer_;
+        ah_set_timer(AhTimer::none, 0);
+        const bool want = ah_pointer_or_pinned();
+        if (kind == AhTimer::reveal && want) ah_set_shown(true);
+        if (kind == AhTimer::hide && !want) ah_set_shown(false);
+        return;
+    }
+    if (id != timer_ah_frame) return;
+    const float target = ah_shown_ ? 1.0f : 0.0f;
+    // A reversal mid-way takes only the remaining share of the duration.
+    const float span = (std::max)(0.05f, std::fabs(target - ah_from_));
+    const float duration = static_cast<float>(settings_.animation_ms) * span;
+    const float t = std::clamp(static_cast<float>(GetTickCount64() - ah_anim_start_) / duration, 0.0f, 1.0f);
+    const float eased = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // ease-out cubic
+    ah_progress_ = ah_from_ + (target - ah_from_) * eased;
+    if (t >= 1.0f) {
+        ah_progress_ = target;
+        ah_animating_ = false;
+        KillTimer(self, timer_ah_frame);
+    }
+    layout();
+    // A slide ends under the pointer: arm the leave tracking again.
+    if (!ah_animating_ && ah_shown_) strip_.track_pointer();
+}
+
+void TabsContainer::ah_note_switch() noexcept {
+    if (!auto_hide() || get_wnd() == nullptr) return;
+    linger_until_ = GetTickCount64() + settings_.linger_ms;
+    if (!ah_shown_ && settings_.linger_ms != 0) {
+        ah_set_timer(AhTimer::none, 0);
+        ah_set_shown(true);
+    }
+    ah_evaluate();
+}
+
+void TabsContainer::on_strip_pointer() noexcept { ah_evaluate(); }
+
+void TabsContainer::on_hot_zone(bool, bool clicked) noexcept {
+    if (clicked && auto_hide() && !ah_shown_) {
+        // A click in the hot zone reveals at once, whatever the delay.
+        ah_set_timer(AhTimer::none, 0);
+        ah_set_shown(true);
+        return;
+    }
+    ah_evaluate();
 }
 
 uie::window_factory<TabsContainer> g_container_factory;

@@ -106,6 +106,9 @@ public:
     //! A drag moved tab `from` to position `to` (strip indices, both before the move). The strip
     //! already shows the new order; the host makes it real and sends the tabs again.
     virtual void on_strip_reorder(std::size_t from, std::size_t to) noexcept = 0;
+    //! The pointer entered or left the strip, mouse capture or keyboard focus changed. Auto-hide
+    //! re-evaluates on it; nothing else needs it.
+    virtual void on_strip_pointer() noexcept {}
 
 protected:
     ~StripListener() = default;
@@ -145,6 +148,21 @@ public:
 
     //! Paint statistics since the last call.
     void take_paint_stats(perf::PaintStats& out) noexcept;
+
+    //! Auto-hide over the panel: a layered child (Windows 8+), composed without touching the
+    //! panel under it. False if Windows refused (then the strip stays an ordinary child).
+    bool set_layered(bool layered) noexcept;
+    [[nodiscard]] bool layered() const noexcept { return layered_; }
+    //! Constant opacity of a layered strip (fade animation).
+    void set_alpha(BYTE alpha) noexcept;
+    //! Call when hiding the strip: a window hidden under the pointer gets no WM_MOUSELEAVE, and
+    //! its hover state would be stale (and leave tracking dead) the next time it is shown.
+    void forget_pointer() noexcept;
+    //! Arms WM_MOUSELEAVE now, for a strip that just appeared under a pointer that has not moved.
+    //! If the pointer is elsewhere, Windows posts the leave at once (and the host hears of it).
+    void track_pointer() noexcept;
+    //! A drag is in progress.
+    [[nodiscard]] bool dragging() const noexcept { return dragging_; }
 
     //! Where the last create() spent its time (perf log): window class + window, DPI and UI
     //! state, text format + items.
@@ -242,6 +260,8 @@ private:
     StripFont font_{};
     //! No text format is built before the host's first set_font(): it would be thrown away.
     bool font_set_{false};
+    bool layered_{false};
+    BYTE alpha_{255};
     CreateTimings create_timings_{};
     //! QueryPerformanceCounter at WM_NCCREATE / WM_CREATE of the window being created.
     long long nccreate_qpc_{0};

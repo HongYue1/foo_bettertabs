@@ -118,6 +118,7 @@
     <ClCompile Include="src\platform\graphics.cpp" />
     <ClCompile Include="src\platform\logging.cpp" />
     <ClCompile Include="src\platform\perf.cpp" />
+    <ClCompile Include="src\strip\hot_zone.cpp" />
     <ClCompile Include="src\strip\strip_layout.cpp" />
     <ClCompile Include="src\strip\strip_window.cpp" />
   </ItemGroup>
@@ -130,6 +131,7 @@
     <ClInclude Include="src\platform\graphics.h" />
     <ClInclude Include="src\platform\logging.h" />
     <ClInclude Include="src\platform\perf.h" />
+    <ClInclude Include="src\strip\hot_zone.h" />
     <ClInclude Include="src\strip\strip_layout.h" />
     <ClInclude Include="src\strip\strip_window.h" />
     <ClInclude Include="src\hosts\configure_dialog.h" />

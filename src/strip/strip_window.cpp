@@ -910,6 +910,7 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
             if (dragging_) end_drag(false);
             press_index_ = no_index;
         }
+        if (listener_ != nullptr) listener_->on_strip_pointer();
         return 0;
     case WM_NOTIFY: {
         // Only the tooltip's text request. Anything below 64 KB is no pointer (see PLAN.md 12).
@@ -963,6 +964,7 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
     case WM_KILLFOCUS:
         focused_ = msg == WM_SETFOCUS;
         invalidate_tab(active_);
+        if (listener_ != nullptr) listener_->on_strip_pointer();
         break;
     case WM_UPDATEUISTATE: {
         const LRESULT result = DefWindowProcW(wnd_, msg, wp, lp);
@@ -1049,6 +1051,8 @@ void StripWindow::on_mouse_move(POINT pt) noexcept {
     if (!tracking_) {
         TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, wnd_, 0};
         tracking_ = TrackMouseEvent(&tme) != FALSE;
+        if (listener_ != nullptr) listener_->on_strip_pointer();
+        if (wnd_ == nullptr) return;
     }
     if (press_index_ != no_index && GetCapture() == wnd_) {
         if (!dragging_ && settings_.drag_reorder && items_.size() > 1) {
@@ -1082,8 +1086,57 @@ void StripWindow::on_mouse_move(POINT pt) noexcept {
     }
 }
 
+void StripWindow::forget_pointer() noexcept {
+    if (tooltip_ != nullptr) SendMessageW(tooltip_, TTM_POP, 0, 0);
+    if (tracking_ && wnd_ != nullptr) {
+        TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE | TME_CANCEL, wnd_, 0};
+        (void)TrackMouseEvent(&tme);
+    }
+    tracking_ = false;
+    if (hover_ != no_index && !dragging_) {
+        const std::size_t old = hover_;
+        hover_ = no_index;
+        invalidate_tab(old);
+        update_tooltip();
+    }
+    chevron_hover_ = false;
+}
+
+void StripWindow::track_pointer() noexcept {
+    if (tracking_ || wnd_ == nullptr || !IsWindowVisible(wnd_)) return;
+    TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, wnd_, 0};
+    tracking_ = TrackMouseEvent(&tme) != FALSE;
+}
+
+bool StripWindow::set_layered(bool layered) noexcept {
+    if (wnd_ == nullptr) return false;
+    if (layered == layered_) return true;
+    const LONG_PTR ex = GetWindowLongPtrW(wnd_, GWL_EXSTYLE);
+    if (layered) {
+        SetWindowLongPtrW(wnd_, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+        alpha_ = 255;
+        if (!SetLayeredWindowAttributes(wnd_, 0, alpha_, LWA_ALPHA)) {
+            SetWindowLongPtrW(wnd_, GWL_EXSTYLE, ex & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+            return false;
+        }
+    } else {
+        SetWindowLongPtrW(wnd_, GWL_EXSTYLE, ex & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+        RedrawWindow(wnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
+    }
+    layered_ = layered;
+    return true;
+}
+
+void StripWindow::set_alpha(BYTE alpha) noexcept {
+    if (!layered_ || wnd_ == nullptr || alpha == alpha_) return;
+    alpha_ = alpha;
+    SetLayeredWindowAttributes(wnd_, 0, alpha, LWA_ALPHA);
+}
+
 void StripWindow::on_mouse_leave() noexcept {
     tracking_ = false;
+    if (listener_ != nullptr) listener_->on_strip_pointer();
+    if (wnd_ == nullptr) return;
     if (hover_ != no_index && !dragging_) {
         const std::size_t old = hover_;
         hover_ = no_index;

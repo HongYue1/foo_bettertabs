@@ -156,6 +156,38 @@ BEGIN
     CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,183,281,10
 END
 
+IDD_PAGE_AUTOHIDE DIALOGEX 0, 0, 300, 198
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Auto-hide",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LTEXT           "Used when Show the strip (Behaviour page) is Auto-hide.",IDC_STATIC,12,21,281,8
+    LTEXT           "Reveal:",IDC_STATIC,12,37,84,8
+    COMBOBOX        IDC_AH_MODE,99,35,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Animation:",IDC_STATIC,12,53,84,8
+    COMBOBOX        IDC_AH_ANIM,99,51,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Animation length:",IDC_STATIC,12,69,84,8
+    EDITTEXT        IDC_AH_ANIM_MS,99,67,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms (50-1000)",IDC_STATIC,131,69,162,8
+
+    LTEXT           "Timing",IDC_STATIC,7,91,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,101,286,1
+    LTEXT           "Hot zone:",IDC_STATIC,12,110,84,8
+    EDITTEXT        IDC_AH_HOT_ZONE,99,108,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs along the edge that reveal the strip (1-32)",IDC_STATIC,131,110,162,8
+    LTEXT           "Show after:",IDC_STATIC,12,126,84,8
+    EDITTEXT        IDC_AH_REVEAL,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms in the hot zone (0-5000)",IDC_STATIC,131,126,162,8
+    LTEXT           "Hide after:",IDC_STATIC,12,142,84,8
+    EDITTEXT        IDC_AH_HIDE,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms once the pointer has left (0-5000)",IDC_STATIC,131,142,162,8
+    LTEXT           "After a switch:",IDC_STATIC,12,158,84,8
+    EDITTEXT        IDC_AH_LINGER,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms shown at least (0-5000)",IDC_STATIC,131,158,162,8
+    LTEXT           "The strip also stays while its menu is open, during a drag and while it has the keyboard focus.",IDC_STATIC,12,174,281,16
+END
+
 /////////////////////////////////////////////////////////////////////////////
 // Rename: modal, from the strip's right-click menu.
 

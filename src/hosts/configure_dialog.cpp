@@ -30,7 +30,7 @@ namespace bettertabs {
 
 namespace {
 
-constexpr int page_count = 4;
+constexpr int page_count = 5;
 
 //! A control by id on the dialog itself or on one of its pages (ids are unique across pages).
 [[nodiscard]] HWND find_control(HWND dialog, int control) {
@@ -345,7 +345,7 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     create_pages();
     {
         const HWND tabs = ::GetDlgItem(m_hWnd, IDC_TABS);
-        const wchar_t* const names[page_count] = {L"Strip", L"Look", L"Tabs", L"Behaviour"};
+        const wchar_t* const names[page_count] = {L"Strip", L"Look", L"Tabs", L"Behaviour", L"Auto-hide"};
         for (int i = 0; i < page_count; ++i) {
             TCITEMW item{};
             item.mask = TCIF_TEXT;
@@ -361,7 +361,11 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
         show_page(0);
     }
     fill_combo(control(IDC_POSITION), {L"Top", L"Bottom", L"Left", L"Right"});
-    fill_combo(control(IDC_VISIBILITY), {L"Always", L"Only with two or more tabs"});
+    // Order matters: visibility_order below.
+    fill_combo(control(IDC_VISIBILITY), {L"Always", L"Only with two or more tabs", L"Auto-hide", L"Never"});
+    // Order matters: RevealMode and ShowHideAnimation, one for one.
+    fill_combo(control(IDC_AH_MODE), {L"Over the panel (fastest)", L"Push the panel aside"});
+    fill_combo(control(IDC_AH_ANIM), {L"None", L"Slide", L"Fade"});
     fill_combo(control(IDC_SIZING), {L"Fit the title", L"All equal", L"Fill the strip"});
     fill_combo(control(IDC_ALIGN), {L"Start", L"Centre", L"End"});
     fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only"});
@@ -451,10 +455,10 @@ void ConfigureDialog::settings_to_controls() {
     loading_ = true;
     const Settings& s = state_.settings;
     select(IDC_POSITION, static_cast<int>(s.position));
-    // Never and auto-hide have no entry here (yet): show no selection and keep the value.
     select(IDC_VISIBILITY, s.visibility == StripVisibility::always        ? 0
                            : s.visibility == StripVisibility::two_or_more ? 1
-                                                                          : -1);
+                           : s.visibility == StripVisibility::auto_hide   ? 2
+                                                                          : 3);
     check(IDC_ROTATE, s.side_text == SideText::rotated);
     select(IDC_SIZING, static_cast<int>(s.sizing));
     select(IDC_ALIGN, static_cast<int>(s.align));
@@ -482,6 +486,14 @@ void ConfigureDialog::settings_to_controls() {
     check(IDC_LAZY, s.lazy_children);
     check(IDC_REMEMBER, s.remember_active);
     check(IDC_ICONS_ONLY, s.icons_only);
+
+    select(IDC_AH_MODE, static_cast<int>(s.reveal_mode));
+    select(IDC_AH_ANIM, static_cast<int>(s.show_hide_animation));
+    set_number(IDC_AH_ANIM_MS, s.animation_ms);
+    set_number(IDC_AH_HOT_ZONE, s.hot_zone);
+    set_number(IDC_AH_REVEAL, s.reveal_delay_ms);
+    set_number(IDC_AH_HIDE, s.hide_delay_ms);
+    set_number(IDC_AH_LINGER, s.linger_ms);
     loading_ = false;
     update_values();
     update_enabled();
@@ -497,7 +509,9 @@ void ConfigureDialog::settings_from_controls() {
     };
     pick(IDC_POSITION, s.position);
     if (const LRESULT v = selection(IDC_VISIBILITY); v != CB_ERR) {
-        s.visibility = v == 0 ? StripVisibility::always : StripVisibility::two_or_more;
+        constexpr StripVisibility visibility_order[] = {StripVisibility::always, StripVisibility::two_or_more,
+                                                        StripVisibility::auto_hide, StripVisibility::never};
+        if (v >= 0 && v < 4) s.visibility = visibility_order[v];
     }
     s.side_text = checked(IDC_ROTATE) ? SideText::rotated : SideText::horizontal;
     pick(IDC_SIZING, s.sizing);
@@ -527,6 +541,14 @@ void ConfigureDialog::settings_from_controls() {
     s.lazy_children = checked(IDC_LAZY);
     s.remember_active = checked(IDC_REMEMBER);
     s.icons_only = checked(IDC_ICONS_ONLY);
+
+    pick(IDC_AH_MODE, s.reveal_mode);
+    pick(IDC_AH_ANIM, s.show_hide_animation);
+    s.animation_ms = number(IDC_AH_ANIM_MS);
+    s.hot_zone = number(IDC_AH_HOT_ZONE);
+    s.reveal_delay_ms = number(IDC_AH_REVEAL);
+    s.hide_delay_ms = number(IDC_AH_HIDE);
+    s.linger_ms = number(IDC_AH_LINGER);
 }
 
 void ConfigureDialog::update_values() {
@@ -555,6 +577,15 @@ void ConfigureDialog::update_enabled() {
     const bool tint = s.strip_background == StripBackground::accent_tint;
     enable(IDC_TINT, tint);
     enable(IDC_TINT_VALUE, tint);
+
+    const bool auto_hide = s.visibility == StripVisibility::auto_hide;
+    for (const int id : {IDC_AH_MODE, IDC_AH_ANIM, IDC_AH_HOT_ZONE, IDC_AH_REVEAL, IDC_AH_HIDE, IDC_AH_LINGER}) {
+        enable(id, auto_hide);
+    }
+    // Show/hide animations run on the layered strip, i.e. over the panel only.
+    enable(IDC_AH_ANIM, auto_hide && s.reveal_mode == RevealMode::overlay);
+    enable(IDC_AH_ANIM_MS, auto_hide && s.reveal_mode == RevealMode::overlay &&
+                               s.show_hide_animation != ShowHideAnimation::none);
 
     const bool have = selected_ >= 0 && static_cast<std::size_t>(selected_) < state_.tabs.size();
     for (const int id : {IDC_TAB_TITLE, IDC_TAB_TITLE_HELP, IDC_TAB_FORMAT, IDC_TAB_ICON, IDC_CHARMAP,

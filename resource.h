@@ -11,6 +11,7 @@
 #define IDD_PAGE_LOOK 103
 #define IDD_PAGE_TABS 104
 #define IDD_PAGE_BEHAVIOUR 105
+#define IDD_PAGE_AUTOHIDE 106
 #define IDD_RENAME 110
 
 #define IDC_TABS 1000
@@ -69,6 +70,15 @@
 #define IDC_LAZY 1074
 #define IDC_REMEMBER 1075
 #define IDC_ICONS_ONLY 1076
+
+// Auto-hide
+#define IDC_AH_MODE 1080
+#define IDC_AH_ANIM 1081
+#define IDC_AH_ANIM_MS 1082
+#define IDC_AH_HOT_ZONE 1083
+#define IDC_AH_REVEAL 1084
+#define IDC_AH_HIDE 1085
+#define IDC_AH_LINGER 1086
 
 // Rename
 #define IDC_RENAME_TITLE 1090

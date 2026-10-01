@@ -52,7 +52,7 @@ struct Settings {
     std::uint8_t tint_strength{12};
     std::uint16_t corner_radius{4};
     bool chip{false};
-    //! Tab switches animate: the indicator slides, the two tabs' colours cross-fade.
+    //! Tab switches animate: the indicator (underline, pill or chip fill) slides.
     bool animations{true};
     //! Length of the auto-hide show/hide animation.
     std::uint16_t animation_ms{150};

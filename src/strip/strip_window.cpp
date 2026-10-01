@@ -826,14 +826,10 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     const RECT r = tab_rect(index);
     const bool active = index == active_;
     const bool hover = index == hover_;
-    // While switching, the moving indicator carries the active look (draw_switch_indicator) and
-    // the two tabs blend their colours by `weight`.
+    // While switching, the moving indicator carries the active fill and underline
+    // (draw_switch_indicator). Text and icon colours change at once, not with the slide: a fade
+    // between, say, white and black text passes through an unreadable grey.
     const bool active_look = active && !switching_;
-    float weight = active ? 1.0f : 0.0f;
-    if (switching_) {
-        if (index == active_) weight = switch_t_;
-        else if (index == switch_from_) weight = 1.0f - switch_t_;
-    }
     const D2D1::Matrix3x2F base = D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_);
 
     // Work in a "frame": the tab as a horizontal rectangle, plus the edge facing the panel.
@@ -919,10 +915,14 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - static_cast<float>(content)) / 2.0f));
         }
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
-        COLORREF text = hover ? theme_.text : blend(theme_.text, blend(theme_.text, surface_, inactive_text), weight);
-        if (accent_fill && fill_alpha >= strong_fill) {
+        COLORREF text = active || hover ? theme_.text : blend(theme_.text, surface_, inactive_text);
+        const bool final_fill = active && (settings_.indicator == Indicator::pill || settings_.chip);
+        const float final_alpha = final_fill ? active_fill_alpha() : 0.0f;
+        if (final_fill && final_alpha >= strong_fill) {
             // A strong accent fill: keep the theme's text if it still reads, else white or black.
-            const std::uint32_t under = colour::rgb_from_colorref(blend(fill, surface_, fill_alpha));
+            // Judged against the fill the tab ends with, also while it is still sliding in.
+            const COLORREF final_colour = accent_fill_colour(theme_, final_alpha);
+            const std::uint32_t under = colour::rgb_from_colorref(blend(final_colour, surface_, final_alpha));
             const std::uint32_t own = colour::rgb_from_colorref(text);
             if (colour::contrast_ratio(own, under) < text_min_contrast) {
                 text = colour::contrast_ratio(0xFFFFFFu, under) >= colour::contrast_ratio(0x000000u, under)
@@ -933,8 +933,8 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
         if (item.icon_layout) {
             // The active tab's icon carries the accent unless a fill already does.
-            const bool accent_icon = settings_.indicator == Indicator::underline && !settings_.chip;
-            const COLORREF icon = accent_icon && weight > 0.0f ? blend(theme_.accent, text, weight) : text;
+            const bool accent_icon = active && settings_.indicator == Indicator::underline && !settings_.chip;
+            const COLORREF icon = accent_icon ? theme_.accent : text;
             const float iy = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.icon_height)) / 2.0f);
             brush_->SetColor(d2d_colour(icon));
             target_->DrawTextLayout(D2D1::Point2F(x, iy), item.icon_layout.get(), brush_.get(), draw_text_options_);

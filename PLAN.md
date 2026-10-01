@@ -591,3 +591,7 @@ To add once verified in a build (AGENTS.md: verify before writing):
   interpolated rect before the tabs (so text stays on top, ClearType kept); the two tabs skip their
   own active look and blend text and icon colours by the eased weight. "Cross-fade" is that colour
   blend: only the strip animates, panels switch at once. Off costs one bool test per paint.
+- User test of beta 3: works (11 strip paints per 150 ms switch, worst ~1 ms, 0 allocations).
+- 0.4.0 beta 4: no colour fade, at the user's request (white to black text passes through grey).
+  Text and icon colours switch at once to the final state, the strong-fill contrast pick included
+  (judged against the fill the tab ends with); only the indicator slides.

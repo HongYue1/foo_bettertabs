@@ -255,7 +255,7 @@ private:
     [[nodiscard]] float active_fill_alpha() const noexcept;
 
     // Tab switch animation (Settings::animations): the indicator slides from the old tab to the
-    // new one and the two tabs' colours cross-fade. Off, nothing below runs.
+    // new one; text colours change at once. Off, nothing below runs.
     void start_switch(std::size_t from) noexcept;
     void stop_switch() noexcept;
     void on_switch_timer() noexcept;

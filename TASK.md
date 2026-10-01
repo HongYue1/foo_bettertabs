@@ -28,7 +28,8 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
   Win32, 0 warnings, tests pass, 0 dialog problems. Confirmed by the user. Beta 2: defaults slide
   animation and 6 DIP hot zone.
 - **0.4.0 beta 3** (M(d) step 2): tab switch animation, indicator slide + colour cross-fade
-  (PLAN.md section 14, "0.4.0 beta 3"). Built, tests pass, 0 dialog problems. Waiting for the test.
+  (PLAN.md section 14, "0.4.0 beta 3"). Confirmed by the user. Beta 4: text colours change at once,
+  only the indicator slides. Waiting for the test.
 
 ## Waiting for
 

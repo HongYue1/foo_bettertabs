@@ -141,7 +141,7 @@ BEGIN
     COMBOBOX        IDC_VISIBILITY,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     CONTROL         "Animate switches",IDC_SWITCH_ANIM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,38,84,10
     EDITTEXT        IDC_SWITCH_MS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms, slide and cross-fade (50-1000)",IDC_STATIC,131,39,162,8
+    LTEXT           "ms: the indicator slides (50-1000)",IDC_STATIC,131,39,162,8
 
     LTEXT           "Mouse and keyboard",IDC_STATIC,7,57,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,67,286,1

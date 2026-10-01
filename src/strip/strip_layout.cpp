@@ -25,6 +25,37 @@ void layout_strip(const StripLayoutInput& in, StripLayout& out) {
     long long total = static_cast<long long>(spacing) * static_cast<long long>(n - 1);
     for (const Span& s : out.tabs) total += s.length;
 
+    if (total > in.length && in.shrink_floor > 0) {
+        // Shorten the longest tabs to a common cap (the shorter ones keep their length), never
+        // below the floor. Binary search for the largest cap that fits.
+        const long long gaps = static_cast<long long>(spacing) * static_cast<long long>(n - 1);
+        const auto total_at = [&](int cap) {
+            long long sum = gaps;
+            for (const Span& s : out.tabs) {
+                const int floor = (std::min)(s.length, in.shrink_floor);
+                sum += (std::max)(floor, (std::min)(s.length, cap));
+            }
+            return sum;
+        };
+        if (total_at(0) <= in.length) {
+            int lo = 0;
+            int hi = widest;
+            while (lo < hi) {
+                const int mid = lo + (hi - lo + 1) / 2;
+                if (total_at(mid) <= in.length) {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            for (Span& s : out.tabs) {
+                const int floor = (std::min)(s.length, in.shrink_floor);
+                s.length = (std::max)(floor, (std::min)(s.length, lo));
+            }
+            total = total_at(lo);
+        }
+    }
+
     if (total <= in.length) {
         out.first = 0;
         out.last = n;

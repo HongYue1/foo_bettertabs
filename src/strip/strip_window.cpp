@@ -122,6 +122,20 @@ StripWindow::~StripWindow() {
 
 bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
     if (wnd_ != nullptr) return true;
+    // QueryPerformanceCounter directly: the strip has no dependency on perf.cpp (render test).
+    LARGE_INTEGER freq{};
+    LARGE_INTEGER t{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t);
+    const auto lap = [&](double& slot) {
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        if (freq.QuadPart > 0) {
+            slot = static_cast<double>(now.QuadPart - t.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+        }
+        t = now;
+    };
+    create_timings_ = CreateTimings{};
     static const ATOM atom = [] {
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
@@ -141,13 +155,16 @@ bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
         listener_ = nullptr;
         return false;
     }
+    lap(create_timings_.window_ms);
     dpi_ = dpi_override_ != 0 ? dpi_override_ : gfx::window_dpi(wnd);
     const LRESULT ui_state = SendMessageW(wnd, WM_QUERYUISTATE, 0, 0);
     hide_focus_ = (ui_state & UISF_HIDEFOCUS) != 0;
+    lap(create_timings_.state_ms);
     rebuild_text_format();
     rebuild_items();
     update_thickness();
-    ensure_tooltip();
+    lap(create_timings_.text_ms);
+    // The tooltip is created on the first hover (on_mouse_move), not at startup.
     return true;
 }
 
@@ -224,6 +241,7 @@ bool StripWindow::make_layout(IDWriteTextFormat* format, const std::wstring& tex
 
 void StripWindow::set_font(const StripFont& font) noexcept {
     font_ = font;
+    font_set_ = true;
     rebuild_text_format();
     rebuild_items();
     update_thickness();
@@ -289,6 +307,7 @@ void StripWindow::rebuild_text_format() noexcept {
     icon_formats_.clear();
     ++generation_; // every item's layouts belong to the old format
     line_height_ = 0;
+    if (!font_set_) return;
     IDWriteFactory* factory = gfx::dwrite();
     if (factory == nullptr) return;
 
@@ -507,6 +526,8 @@ void StripWindow::relayout() noexcept {
         in.chevron = px(24);
         in.extents = extents_;
         in.active = active_;
+        // Along the text a tab can give up all but a few characters before the chevron appears.
+        if (along_text) in.shrink_floor = 3 * line_height_ + 2 * pad_x;
         layout_strip(in, layout_);
     } catch (...) {
         layout_ = StripLayout{};
@@ -996,6 +1017,7 @@ void StripWindow::on_size(int width, int height) noexcept {
 }
 
 void StripWindow::on_mouse_move(POINT pt) noexcept {
+    ensure_tooltip();
     if (!tracking_) {
         TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, wnd_, 0};
         tracking_ = TrackMouseEvent(&tme) != FALSE;

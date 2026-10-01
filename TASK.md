@@ -17,21 +17,23 @@ Read PROMPT.md (brief), PLAN.md (design, decisions in section 11), then this fil
 - **M(c) 0.3.0**: Configure dialog, rename, icons, title formatting, middle click, drag reorder,
   Ctrl+Tab, follow playback, hidden tabs menu (PLAN.md section 14). Tested by the user: all pass
   except follow playback (crash), long titles, and startup time.
-- **0.3.1**: fixes from that test (PLAN.md section 14, "0.3.1"). Built x64 + Win32, tests
-  `EXIT=0 0 0 0`, `dialog_check` 0 problems. No Columns UI import in the DLL.
+- **0.3.1**: fixes from that test (PLAN.md section 14, "0.3.1"). Confirmed: no crash, starts/stops
+  timing, one tab per event, Remove, rotate default, dialog layout. No Columns UI import in the DLL.
+- **0.3.2**: shrink before overflow, Character Map fallback, strip create without throwaway text
+  format or tooltip (PLAN.md section 14, "0.3.2"). Built x64 + Win32, tests pass, 0 dialog problems.
 
 ## Waiting for
 
-- The user's 0.3.1 test, especially the new "container created ... (shared ..., strip ..., ...)"
-  console line from a cold start: it says which step costs the ~155 ms. Then fix that step
-  (suspects: cold D2D/DWrite factory, system font collection, `cui::fonts::get_font` + fallback).
+- The user's 0.3.2 cold-start log line ("strip ... [window, state, text]", "font ..."): whether the
+  ~170 ms is gone or moved into the font step (then it is cold DirectWrite, which CUI's font
+  path shares; consider building the format off the critical path).
+- Long-title shrink and Character Map fallback on the user's machine.
 - Whether the component loads cleanly in a Default UI-only setup (no Columns UI installed).
-- The user's answer on when to do M(e) (Default UI container, PLAN.md section 9).
 
 ## Next
 
 - M(d): auto-hide + animations (an Auto-hide page in the Configure dialog; "Show the strip" gets
-  an auto-hide entry). Then M(e) unless the user wants it sooner.
+  an auto-hide entry). Then M(e) (user left the order to us: M(d) first).
 - README (foo_osd style, screenshots), package, skill updates (PLAN.md section 10 plus: reorder_panels
   semantics, Tab stack host behaviour and is_point_ours, transparent children forward
   WM_ERASEBKGND, the CUI Layout page calls show_config_popup on an instance without a window, then

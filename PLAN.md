@@ -522,3 +522,17 @@ To add once verified in a build (AGENTS.md: verify before writing):
 - Startup: the first container took ~155 ms of its own time (later ones 3-5 ms). The creation log
   line now lists per-step timings (shared, strip, cover, colours, font, objects, layout, activate)
   to locate it; fix pending the user's log.
+
+### 0.3.2
+
+- User log: 173.6 of 175 ms is `StripWindow::create`. It built a text format from the GDI message
+  font through `IDWriteGdiInterop` (thrown away moments later by the real Columns UI font) and
+  created the tooltip. Now no text format exists before the first `set_font()`, the tooltip is
+  created on the first hover, and `create` reports window / state / text sub-timings.
+- Shrink before overflow: `StripLayoutInput::shrink_floor` (3 line heights + padding, along the
+  text only). The longest tabs are cut to a common cap first (equal sizing stays equal); the chevron
+  appears only when every tab is at its floor. Layout tests added.
+- Character Map button: `SearchPathW` for charmap.exe, else Microsoft's Segoe Fluent Icons page
+  (debloated Windows has no charmap). `SEE_MASK_FLAG_NO_UI`, so no shell error box.
+- Order: M(d) before M(e). The user is on Columns UI and can test auto-hide at once, and M(e)
+  then reuses the finished strip, auto-hide included.

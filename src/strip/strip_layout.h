@@ -33,6 +33,10 @@ struct StripLayoutInput {
     std::span<const int> extents;
     //! Kept on screen when the tabs overflow. no_index = none.
     std::size_t active{no_index};
+    //! When the tabs do not fit, the longest are shortened first (ellipsis), but never below this
+    //! (or their natural length, if shorter). Only when even that does not fit do they overflow
+    //! to the chevron. 0 = never shorten.
+    int shrink_floor{0};
 };
 
 struct StripLayout {

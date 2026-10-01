@@ -712,7 +712,25 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
         if (code == BN_CLICKED) remove_selected();
         return;
     case IDC_CHARMAP:
-        if (code == BN_CLICKED) ::ShellExecuteW(m_hWnd, L"open", L"charmap.exe", nullptr, nullptr, SW_SHOWNORMAL);
+        if (code == BN_CLICKED) {
+            // Debloated Windows installs drop charmap.exe. Then Microsoft's Segoe Fluent Icons
+            // page, which lists every icon with its code point (most are shared with MDL2).
+            const auto open = [this](const wchar_t* file) {
+                SHELLEXECUTEINFOW info{};
+                info.cbSize = sizeof(info);
+                info.fMask = SEE_MASK_FLAG_NO_UI;
+                info.hwnd = m_hWnd;
+                info.lpVerb = L"open";
+                info.lpFile = file;
+                info.nShow = SW_SHOWNORMAL;
+                return ::ShellExecuteExW(&info) != FALSE;
+            };
+            wchar_t found[MAX_PATH]{};
+            const bool have_charmap = ::SearchPathW(nullptr, L"charmap.exe", nullptr, MAX_PATH, found, nullptr) != 0;
+            if (!have_charmap || !open(found)) {
+                (void)open(L"https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font");
+            }
+        }
         return;
     case IDC_MOVE_UP:
     case IDC_MOVE_DOWN:

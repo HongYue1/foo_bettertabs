@@ -93,6 +93,38 @@ int main() {
         check(e.tabs.empty() && hit_test_strip(e, 5) == no_index, "no tabs");
     }
     {
+        // Shrink before overflow: the long tab gives up length, the short ones keep theirs.
+        const std::vector<int> tabs = {360, 100, 120, 90};
+        StripLayoutInput in;
+        in.length = 500;
+        in.spacing = 2;
+        in.chevron = 24;
+        in.extents = tabs;
+        in.shrink_floor = 60;
+        StripLayout l;
+        layout_strip(in, l);
+        check(!l.overflow && l.first == 0 && l.last == 4, "shrink: all tabs stay, no chevron");
+        check(l.tabs[1].length == 100 && l.tabs[2].length == 120 && l.tabs[3].length == 90, "shrink: short tabs untouched");
+        check(l.tabs[0].length == 500 - 6 - 310 && l.tabs[3].end() == 500, "shrink: long tab takes exactly the rest");
+
+        // Equal sizing shrinks every tab alike.
+        in.sizing = TabSizing::equal;
+        layout_strip(in, l);
+        check(!l.overflow && l.tabs[0].length == l.tabs[3].length && l.tabs[3].end() <= 500, "shrink: equal stays equal");
+
+        // Below the floor it overflows as before.
+        in.sizing = TabSizing::fit;
+        in.length = 200;
+        layout_strip(in, l);
+        check(l.overflow, "shrink: overflow once the floor does not fit");
+
+        // A floor of 0 keeps the old behaviour.
+        in.length = 500;
+        in.shrink_floor = 0;
+        layout_strip(in, l);
+        check(l.overflow, "shrink: off without a floor");
+    }
+    {
         // Reusing the output does not reallocate once grown.
         std::vector<int> many(20, 60);
         StripLayoutInput in;

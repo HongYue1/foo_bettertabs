@@ -125,7 +125,7 @@ BEGIN
     EDITTEXT        IDC_TAB_ICON,99,134,40,12,ES_AUTOHSCROLL
     LTEXT           "",IDC_TAB_ICON_PREVIEW,143,132,18,15,SS_CENTER | SS_NOPREFIX
     PUSHBUTTON      "Character Map",IDC_CHARMAP,229,133,64,14
-    LTEXT           "A code point (E8D6) or the character. Icons: Segoe Fluent Icons or Segoe MDL2 Assets in Character Map. Emoji: Win+.",IDC_STATIC,99,150,194,16
+    LTEXT           "A code point (E8D6) or the character. Icons: Segoe Fluent Icons (button: Character Map, or Microsoft's list). Emoji: Win+.",IDC_STATIC,99,150,194,16
     CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,170,281,10
     CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,184,136,10
     CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,184,138,10

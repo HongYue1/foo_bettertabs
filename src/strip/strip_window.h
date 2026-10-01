@@ -146,6 +146,15 @@ public:
     //! Paint statistics since the last call.
     void take_paint_stats(perf::PaintStats& out) noexcept;
 
+    //! Where the last create() spent its time (perf log): window class + window, DPI and UI
+    //! state, text format + items.
+    struct CreateTimings {
+        double window_ms{0.0};
+        double state_ms{0.0};
+        double text_ms{0.0};
+    };
+    [[nodiscard]] const CreateTimings& create_timings() const noexcept { return create_timings_; }
+
     //! Renders `dirty` into the back buffer. WM_PAINT and the offline render test use it.
     bool render(const RECT& dirty) noexcept;
     //! The back buffer (32 bpp BGRA, top-down, `stride` bytes per row), valid after render().
@@ -224,6 +233,9 @@ private:
     Settings settings_{};
     StripTheme theme_{};
     StripFont font_{};
+    //! No text format is built before the host's first set_font(): it would be thrown away.
+    bool font_set_{false};
+    CreateTimings create_timings_{};
     StripTextOptions text_options_{};
     //! The strip's own background, derived from the theme.
     COLORREF surface_{RGB(255, 255, 255)};

@@ -392,6 +392,10 @@ HostColours TabsContainer::host_colours() const noexcept {
         out.text = colours.get_colour(cui::colours::colour_text);
         out.selection = colours.get_colour(cui::colours::colour_selection_background);
         out.dark = colours.is_dark_mode_active();
+        // Columns UI's layout background (dark::ColourID::LayoutBackground, not in the SDK):
+        // what its splitters' dividers show. Their width is Columns UI's own setting
+        // (Layout > Misc); 0 leaves no gap to show.
+        out.layout = out.dark ? RGB(51, 51, 51) : GetSysColor(COLOR_BTNFACE);
     } catch (...) {
     }
     return out;

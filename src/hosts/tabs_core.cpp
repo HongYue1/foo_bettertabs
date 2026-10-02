@@ -565,19 +565,22 @@ void TabsCore::activate(Tab* next, bool from_user) noexcept {
     const bool setredraw = perf::use_setredraw() && !in_create_;
     if (setredraw) SendMessageW(self, WM_SETREDRAW, FALSE, 0);
 
-    WindowMoves moves;
+    // Size the new panel while it is still hidden, then show it, then hide the old one: the
+    // parent's background is never exposed in between. Showing and hiding go through ShowWindow
+    // (as Tab stack does), not SWP_SHOWWINDOW: (Defer)SetWindowPos never sends WM_SHOWWINDOW,
+    // and Columns UI's splitters show their own children only from it, so a Row or Column tab
+    // stayed empty (test/showwindow_test.cpp).
+    active_ = next; // before showing: a child may ask the host about visibility meanwhile
     if (next != nullptr && next->wnd != nullptr) {
-        // Show first, then hide: the parent's background is never exposed in between.
-        UINT flags = SWP_SHOWWINDOW;
-        if (same_rect(next->applied, content_)) flags |= SWP_NOMOVE | SWP_NOSIZE;
+        if (!same_rect(next->applied, content_)) {
+            WindowMoves moves;
+            moves.add(next->wnd, content_, 0);
+            moves.apply();
+        }
         next->applied = content_;
-        moves.add(next->wnd, content_, flags);
+        if ((GetWindowLongPtrW(next->wnd, GWL_STYLE) & WS_VISIBLE) == 0) ShowWindow(next->wnd, SW_SHOWNA);
     }
-    if (old != nullptr && old != next && old->wnd != nullptr) {
-        moves.add(old->wnd, old->applied, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
-    }
-    active_ = next;
-    moves.apply();
+    if (old != nullptr && old != next && old->wnd != nullptr) ShowWindow(old->wnd, SW_HIDE);
     if (old != nullptr && old != next && old->wnd != nullptr) host_child_shown(*old, false);
     if (next != nullptr && next->wnd != nullptr && (next != old || created)) host_child_shown(*next, true);
 
@@ -983,8 +986,11 @@ void TabsCore::fill_background(HDC dc) const noexcept {
     if (dc == nullptr) return;
     RECT clip{};
     if (GetClipBox(dc, &clip) == ERROR || IsRectEmpty(&clip)) return;
+    // A child's DC (or its buffer) means a transparent child asking for what lies behind it: the
+    // host's layout background, so a splitter's dividers show as they do outside the container.
+    const COLORREF fill = WindowFromDC(dc) == core_wnd() ? background_ : child_background_;
     // The stock DC brush: no GDI object is created per erase.
-    const COLORREF previous = SetDCBrushColor(dc, background_);
+    const COLORREF previous = SetDCBrushColor(dc, fill);
     FillRect(dc, &clip, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     SetDCBrushColor(dc, previous);
 }
@@ -1051,6 +1057,7 @@ void TabsCore::refresh_colours() noexcept {
         }
 
         background_ = panel;
+        child_background_ = colours.layout.value_or(panel);
         hot_zone_.set_colour(panel);
         strip_.set_theme(theme);
         if (const HWND self = core_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);

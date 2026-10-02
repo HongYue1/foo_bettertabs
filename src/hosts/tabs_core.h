@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,9 @@ struct HostColours {
     COLORREF background{RGB(255, 255, 255)};
     COLORREF text{RGB(0, 0, 0)};
     COLORREF selection{RGB(0, 120, 215)};
+    //! What transparent children (splitters) show through, so the gaps between their panels -
+    //! the dividers - look as they do elsewhere in the host's layout. Unset: `background`.
+    std::optional<COLORREF> layout;
     bool dark{false};
 };
 
@@ -263,6 +267,8 @@ protected:
     RECT content_{};
     Limits limits_{};
     COLORREF background_{RGB(255, 255, 255)};
+    //! Fill for transparent children (HostColours::layout).
+    COLORREF child_background_{RGB(255, 255, 255)};
     bool in_create_{false};
     bool cover_subscribed_{false};
 

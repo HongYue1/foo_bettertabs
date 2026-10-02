@@ -1,5 +1,5 @@
 @echo off
-rem Builds and runs the offline tests (codec, strip layout, cover accent, strip render).
+rem Builds and runs the offline tests (codec, strip layout, cover accent, strip render, WM_SHOWWINDOW).
 rem Output: test\tests.out; render PNGs in test\out\render_*.png
 setlocal
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
@@ -14,6 +14,8 @@ cl %CL_FLAGS% /Fe:out\accent_test.exe accent_test.cpp ..\src\model\cover_accent.
 if errorlevel 1 (type out\build_accent.txt & exit /b 1)
 cl %CL_FLAGS% /Fe:out\render_test.exe render_test.cpp ..\src\strip\strip_window.cpp ..\src\strip\strip_layout.cpp ..\src\platform\graphics.cpp /link /SUBSYSTEM:CONSOLE > out\build_render.txt 2>&1
 if errorlevel 1 (type out\build_render.txt & exit /b 1)
+cl %CL_FLAGS% /Fe:out\showwindow_test.exe showwindow_test.cpp /link /SUBSYSTEM:CONSOLE user32.lib > out\build_showwindow.txt 2>&1
+if errorlevel 1 (type out\build_showwindow.txt & exit /b 1)
 echo == codec == > tests.out
 out\codec_test.exe >> tests.out 2>&1
 set E1=%ERRORLEVEL%
@@ -26,5 +28,8 @@ set E3=%ERRORLEVEL%
 echo == render == >> tests.out
 out\render_test.exe >> tests.out 2>&1
 set E4=%ERRORLEVEL%
-echo EXIT=%E1% %E2% %E3% %E4% >> tests.out
+echo == showwindow == >> tests.out
+out\showwindow_test.exe >> tests.out 2>&1
+set E5=%ERRORLEVEL%
+echo EXIT=%E1% %E2% %E3% %E4% %E5% >> tests.out
 type tests.out

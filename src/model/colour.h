@@ -2,7 +2,7 @@
 
 // Colour maths in OKLab / OKLCh (Bjoern Ottosson, 2020): a perceptual space where equal steps
 // look equal and lightness means what the eye sees. Ported from foo_mediabar (src/model/colour.h
-// and the accent half of src/render/theme.h), which ported it from foo_osd; the legibility step
+// and the accent half of src/render/theme.h), which ported it from foo_onscreendisplay; the legibility step
 // must stay identical so a cover gives the same accent in all three components.
 //
 // Header-only, no Windows dependency, so the offline accent test compiles it as is. Colours
@@ -101,7 +101,7 @@ inline constexpr float grey_chroma = 0.035f;
 
 //! The cover's colour made legible as an accent on a dark or light panel: the same hue, at a
 //! lightness that stands out from the panel, colourful enough to read as a colour. A grey cover
-//! gets an off-white (dark panel) or charcoal (light panel). Identical to foo_mediabar/foo_osd.
+//! gets an off-white (dark panel) or charcoal (light panel). Identical to foo_mediabar/foo_onscreendisplay.
 [[nodiscard]] inline std::uint32_t accent_for_card(std::uint32_t rgb, bool light_card) noexcept {
     const Lab c = from_rgb(rgb);
     const float C = chroma(c);

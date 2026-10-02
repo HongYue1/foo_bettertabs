@@ -1018,7 +1018,7 @@ void TabsCore::refresh_colours() noexcept {
 
         // Every accent passes a 3:1 contrast floor against the strip. A cover colour is raw, so
         // it also gets the full legibility treatment (lightness window, chroma floor; the same
-        // code as Media Bar and foo_osd). the host's selection colour and a custom colour are
+        // code as Media Bar and foo_onscreendisplay). the host's selection colour and a custom colour are
         // the user's choice and are only nudged when they would vanish.
         std::uint32_t accent = colour::rgb_from_colorref(colours.selection);
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;

@@ -2,7 +2,7 @@
 // covers through extract_cover_accent and accent_for_background, on a dark and a light strip.
 // Built and run by test\build_tests.bat.
 //
-// Also cross-checks model/colour.h against foo_osd/src/colour.h, which it was ported from.
+// Also cross-checks model/colour.h against foo_onscreendisplay/src/colour.h, which it was ported from.
 
 #include <windows.h>
 
@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <vector>
 
-#include "../../foo_osd/src/colour.h"
+#include "../../foo_onscreendisplay/src/colour.h"
 #include "../src/model/colour.h"
 #include "../src/model/cover_accent.h"
 
@@ -115,7 +115,7 @@ int main() {
         const std::uint32_t rgb = *raw & 0xffffffu;
         if (colour::accent_for_card(rgb, false) != osd::colour::accentForCard(rgb, false) ||
             colour::accent_for_card(rgb, true) != osd::colour::accentForCard(rgb, true)) {
-            std::printf("  MISMATCH with foo_osd accentForCard\n");
+            std::printf("  MISMATCH with foo_onscreendisplay accentForCard\n");
             ++failures;
         }
     }

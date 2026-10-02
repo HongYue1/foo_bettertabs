@@ -1,5 +1,5 @@
 // Ported unchanged from foo_mediabar/src/model/cover_accent.cpp (same author, same algorithm),
-// so a cover gives the same accent in Better Tabs, Media Bar and foo_osd.
+// so a cover gives the same accent in Better Tabs, Media Bar and foo_onscreendisplay.
 
 #include "cover_accent.h"
 

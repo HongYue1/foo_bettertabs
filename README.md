@@ -182,7 +182,7 @@ does not break an existing layout.
 
 ## See also
 
-- [foo_osd](https://github.com/HongYue1/foo_osd): Highly customizable On-Screen Display for foobar2000.
+- [foo_onscreendisplay](https://github.com/HongYue1/foo_onscreendisplay): Highly customizable On-Screen Display for foobar2000.
 
 ## License
 

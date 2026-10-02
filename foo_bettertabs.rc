@@ -20,22 +20,22 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 // Configure: modal, per container. The strip, the area the pages are placed in (IDC_PAGE_HOST,
 // never shown) and the buttons.
 
-IDD_CONFIGURE DIALOGEX 0, 0, 300, 250
+IDD_CONFIGURE DIALOGEX 0, 0, 300, 270
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Better Tabs"
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
     CONTROL         "",IDC_TABS,"SysTabControl32",WS_CLIPSIBLINGS | WS_TABSTOP,7,7,286,17
-    LTEXT           "",IDC_PAGE_HOST,0,28,300,198,NOT WS_VISIBLE
-    PUSHBUTTON      "Defaults",IDC_DEFAULTS,7,230,50,14
-    DEFPUSHBUTTON   "OK",IDOK,189,230,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,243,230,50,14
+    LTEXT           "",IDC_PAGE_HOST,0,28,300,218,NOT WS_VISIBLE
+    PUSHBUTTON      "Defaults",IDC_DEFAULTS,7,250,50,14
+    DEFPUSHBUTTON   "OK",IDOK,189,250,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,243,250,50,14
 END
 
-// Pages: child dialogs, 300 x 198, created once and shown one at a time. Keep the ids
+// Pages: child dialogs, 300 x 218, created once and shown one at a time. Keep the ids
 // consecutive and in tab order.
 
-IDD_PAGE_STRIP DIALOGEX 0, 0, 300, 198
+IDD_PAGE_STRIP DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
@@ -54,21 +54,24 @@ BEGIN
     COMBOBOX        IDC_SIZING,99,92,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Alignment:",IDC_STATIC,12,110,84,8
     COMBOBOX        IDC_ALIGN,99,108,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Longest title:",IDC_STATIC,12,126,84,8
-    EDITTEXT        IDC_MAX_WIDTH,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs, then cut with an ellipsis (0 = no limit)",IDC_STATIC,131,126,162,8
-    LTEXT           "Padding across:",IDC_STATIC,12,142,84,8
-    EDITTEXT        IDC_PAD_X,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,142,162,8
-    LTEXT           "Padding along:",IDC_STATIC,12,158,84,8
-    EDITTEXT        IDC_PAD_Y,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,158,162,8
-    LTEXT           "Spacing:",IDC_STATIC,12,174,84,8
-    EDITTEXT        IDC_SPACING,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,174,162,8
+    LTEXT           "Overflow chevron:",IDC_STATIC,12,126,84,8
+    COMBOBOX        IDC_CHEVRON,99,124,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Shorten titles to fit before showing the chevron",IDC_SHRINK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,140,281,10
+    LTEXT           "Longest title:",IDC_STATIC,12,156,84,8
+    EDITTEXT        IDC_MAX_WIDTH,99,154,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs, then cut with an ellipsis (0 = no limit)",IDC_STATIC,131,156,162,8
+    LTEXT           "Padding across:",IDC_STATIC,12,172,84,8
+    EDITTEXT        IDC_PAD_X,99,170,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,172,162,8
+    LTEXT           "Padding along:",IDC_STATIC,12,188,84,8
+    EDITTEXT        IDC_PAD_Y,99,186,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,188,162,8
+    LTEXT           "Spacing:",IDC_STATIC,12,204,84,8
+    EDITTEXT        IDC_SPACING,99,202,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,204,162,8
 END
 
-IDD_PAGE_LOOK DIALOGEX 0, 0, 300, 198
+IDD_PAGE_LOOK DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
@@ -104,7 +107,7 @@ BEGIN
     LTEXT           "",IDC_TINT_VALUE,265,173,28,8
 END
 
-IDD_PAGE_TABS DIALOGEX 0, 0, 300, 198
+IDD_PAGE_TABS DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
@@ -131,7 +134,7 @@ BEGIN
     CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,184,138,10
 END
 
-IDD_PAGE_BEHAVIOUR DIALOGEX 0, 0, 300, 198
+IDD_PAGE_BEHAVIOUR DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
@@ -158,7 +161,7 @@ BEGIN
     CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,183,281,10
 END
 
-IDD_PAGE_AUTOHIDE DIALOGEX 0, 0, 300, 198
+IDD_PAGE_AUTOHIDE DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN

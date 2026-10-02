@@ -12,6 +12,8 @@ enum class StripPosition : std::uint8_t { top, bottom, left, right };
 enum class SideText : std::uint8_t { horizontal, rotated };
 enum class TabSizing : std::uint8_t { fit, equal, fill };
 enum class TabAlign : std::uint8_t { start, centre, end };
+//! Which end of the strip the overflow chevron sits at.
+enum class ChevronPosition : std::uint8_t { end, start };
 enum class StripVisibility : std::uint8_t { always, never, two_or_more, auto_hide };
 enum class Indicator : std::uint8_t { underline, pill, none };
 enum class AccentSource : std::uint8_t { selection, custom, cover };
@@ -30,6 +32,10 @@ struct Settings {
     SideText side_text{SideText::rotated};
     TabSizing sizing{TabSizing::fit};
     TabAlign align{TabAlign::start};
+    ChevronPosition chevron_position{ChevronPosition::end};
+    //! When the tabs do not fit, shorten the longest titles (ellipsis) before overflowing to
+    //! the chevron. Off = overflow straight away and keep every visible title whole.
+    bool shrink_titles{false};
 
     // Metrics, all in DIPs.
     std::uint16_t pad_x{12};

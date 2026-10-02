@@ -368,6 +368,8 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_AH_ANIM), {L"None", L"Slide", L"Fade"});
     fill_combo(control(IDC_SIZING), {L"Fit the title", L"All equal", L"Fill the strip"});
     fill_combo(control(IDC_ALIGN), {L"Start", L"Centre", L"End"});
+    // Order matters: ChevronPosition.
+    fill_combo(control(IDC_CHEVRON), {L"At the end of the strip", L"At the start of the strip"});
     fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only"});
     // Order matters: AccentSource and StripBackground, one for one.
     const std::wstring ui = state_.ui_name != nullptr ? state_.ui_name : L"Columns UI";
@@ -465,6 +467,8 @@ void ConfigureDialog::settings_to_controls() {
     check(IDC_ROTATE, s.side_text == SideText::rotated);
     select(IDC_SIZING, static_cast<int>(s.sizing));
     select(IDC_ALIGN, static_cast<int>(s.align));
+    select(IDC_CHEVRON, static_cast<int>(s.chevron_position));
+    check(IDC_SHRINK, s.shrink_titles);
     set_number(IDC_PAD_X, s.pad_x);
     set_number(IDC_PAD_Y, s.pad_y);
     set_number(IDC_SPACING, s.spacing);
@@ -521,6 +525,8 @@ void ConfigureDialog::settings_from_controls() {
     s.side_text = checked(IDC_ROTATE) ? SideText::rotated : SideText::horizontal;
     pick(IDC_SIZING, s.sizing);
     pick(IDC_ALIGN, s.align);
+    pick(IDC_CHEVRON, s.chevron_position);
+    s.shrink_titles = checked(IDC_SHRINK);
     s.pad_x = number(IDC_PAD_X);
     s.pad_y = number(IDC_PAD_Y);
     s.spacing = number(IDC_SPACING);

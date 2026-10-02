@@ -80,11 +80,15 @@ void layout_strip(const StripLayoutInput& in, StripLayout& out) {
         return;
     }
 
-    // Overflow: a chevron at the end and a window of whole tabs that contains the active one.
+    // Overflow: a chevron at one end and a window of whole tabs that contains the active one.
     out.overflow = true;
     const int chevron = std::clamp(in.chevron, 0, in.length);
-    out.chevron = Span{in.length - chevron, chevron};
-    const int avail = (std::max)(0, in.length - chevron - (chevron > 0 ? spacing : 0));
+    const bool chevron_first = in.chevron_position == ChevronPosition::start;
+    out.chevron = chevron_first ? Span{0, chevron} : Span{in.length - chevron, chevron};
+    const int gap = chevron > 0 ? spacing : 0;
+    const int avail = (std::max)(0, in.length - chevron - gap);
+    // Where the tabs begin: after the chevron when it leads.
+    const int origin = chevron_first ? (std::min)(in.length, chevron + gap) : 0;
 
     const auto fits = [&](std::size_t first, std::size_t last) {
         long long used = 0;
@@ -112,7 +116,7 @@ void layout_strip(const StripLayoutInput& in, StripLayout& out) {
             out.tabs[i] = Span{0, 0};
             continue;
         }
-        out.tabs[i].start = pos;
+        out.tabs[i].start = origin + pos;
         out.tabs[i].length = (std::min)(out.tabs[i].length, (std::max)(0, avail - pos));
         pos += out.tabs[i].length + spacing;
     }

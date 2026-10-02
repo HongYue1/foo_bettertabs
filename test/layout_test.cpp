@@ -75,6 +75,29 @@ int main() {
         check(hit_test_strip(l, 290) == no_index, "hit test on the chevron is no tab");
     }
     {
+        // The chevron can lead instead: tabs start after it and still keep the active one.
+        std::vector<int> many(20, 60);
+        StripLayoutInput in;
+        in.length = 300;
+        in.spacing = 2;
+        in.chevron = 24;
+        in.chevron_position = ChevronPosition::start;
+        in.extents = many;
+        in.active = 15;
+        StripLayout l;
+        layout_strip(in, l);
+        check(l.overflow && l.first <= 15 && 15 < l.last, "chevron at start: active stays visible");
+        check(l.chevron == Span{0, 24}, "chevron at the start");
+        bool inside = true;
+        for (std::size_t i = l.first; i < l.last; ++i) {
+            inside = inside && l.tabs[i].start >= 26 && l.tabs[i].end() <= 300;
+        }
+        check(inside, "chevron at start: tabs clear it and the far edge");
+        check(l.tabs[l.first].start == 26, "chevron at start: first tab right after it");
+        check(hit_test_strip(l, 10) == no_index, "chevron at start: hit test on it is no tab");
+        check(hit_test_strip(l, l.tabs[15].start + 1) == 15, "chevron at start: hit test finds the active tab");
+    }
+    {
         const StripLayout l = run(30, TabSizing::fit, TabAlign::start, {500});
         check(l.first == 0 && l.last == 1 && l.tabs[0].length > 0 && l.tabs[0].end() <= 30, "single huge tab clipped");
     }

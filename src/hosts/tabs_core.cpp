@@ -65,6 +65,8 @@ enum StyleCommand : unsigned {
     style_align_start,
     style_align_centre,
     style_align_end,
+    style_chevron_start,
+    style_shrink_titles,
     style_show_always,
     style_show_two_or_more,
     style_show_auto_hide,
@@ -1420,6 +1422,11 @@ void TabsCore::append_style_menu(HMENU menu) const noexcept {
                     L"Centre");
         AppendMenuW(m, MF_STRING | grey | (s.align == TabAlign::end ? MF_CHECKED : 0), style_align_end,
                     L"Align to end");
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(m, MF_STRING | (s.chevron_position == ChevronPosition::start ? MF_CHECKED : 0),
+                    style_chevron_start, L"Overflow chevron at the start");
+        AppendMenuW(m, MF_STRING | (s.shrink_titles ? MF_CHECKED : 0), style_shrink_titles,
+                    L"Shorten titles before showing the chevron");
     }
     if (HMENU m = sub(L"Show strip"); m != nullptr) {
         radio(m, style_show_always, L"Always", s.visibility == StripVisibility::always);
@@ -1469,6 +1476,11 @@ void TabsCore::run_style_command(unsigned command) noexcept {
     case style_align_start: s.align = TabAlign::start; break;
     case style_align_centre: s.align = TabAlign::centre; break;
     case style_align_end: s.align = TabAlign::end; break;
+    case style_chevron_start:
+        s.chevron_position =
+            s.chevron_position == ChevronPosition::start ? ChevronPosition::end : ChevronPosition::start;
+        break;
+    case style_shrink_titles: s.shrink_titles = !s.shrink_titles; break;
     case style_show_always: s.visibility = StripVisibility::always; break;
     case style_show_two_or_more: s.visibility = StripVisibility::two_or_more; break;
     case style_show_auto_hide: s.visibility = StripVisibility::auto_hide; break;

@@ -653,12 +653,13 @@ void StripWindow::relayout() noexcept {
         in.length = horizontal() ? width_ : height_;
         in.sizing = settings_.sizing;
         in.align = settings_.align;
+        in.chevron_position = settings_.chevron_position;
         in.spacing = px(settings_.spacing);
         in.chevron = px(24);
         in.extents = extents_;
         in.active = active_;
         // Along the text a tab can give up all but a few characters before the chevron appears.
-        if (along_text) in.shrink_floor = 3 * line_height_ + 2 * pad_x;
+        if (along_text && settings_.shrink_titles) in.shrink_floor = 3 * line_height_ + 2 * pad_x;
         layout_strip(in, layout_);
     } catch (...) {
         layout_ = StripLayout{};

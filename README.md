@@ -74,7 +74,7 @@ Right-click the strip (in both UIs):
 | Configure... | The full settings dialog |
 
 In Columns UI the menu also has the panel's own items. When tabs do not fit, a chevron at the end of
-the strip opens the tab list.
+the strip (or at the start, if you prefer) opens the tab list.
 
 ### Configure dialog
 
@@ -84,7 +84,7 @@ Settings belong to each container. Changes show immediately; **Cancel** undoes t
 | Page | What is in it |
 | --- | --- |
 | Strip | Position (top, bottom, left, right); thickness in DIPs (0 = from the font); rotate text on side strips |
-| Look | Tab width (fit the title, all equal, fill the strip) and alignment; longest title before the ellipsis; padding and spacing; indicator (underline, pill, text only), chips, corner radius, fill strength; accent (UI selection colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) |
+| Look | Tab width (fit the title, all equal, fill the strip) and alignment; overflow chevron at the end or the start; shorten titles to fit before showing the chevron (off by default); longest title before the ellipsis; padding and spacing; indicator (underline, pill, text only), chips, corner radius, fill strength; accent (UI selection colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) |
 | Tabs | The tabs in order (move up, move down, remove). Per tab: title (optionally title formatting, see **Help**), icon, hide this tab, show when playback starts, show when playback stops |
 | Behaviour | Show the strip (always, only with two or more tabs, auto-hide, never); animate switches and their length; mouse wheel switches; drag to reorder; Ctrl+Tab; middle click (nothing or hide tab); create panels lazily; remember the active tab; icon-only tabs |
 | Auto-hide | Reveal over the panel (fastest) or push the panel aside; animation (none, slide, fade) and length; hot zone size; delays before showing and hiding; how long the strip stays after a switch |

@@ -27,6 +27,8 @@ Settings odd_settings() {
     s.side_text = SideText::horizontal;
     s.sizing = TabSizing::fill;
     s.align = TabAlign::centre;
+    s.chevron_position = ChevronPosition::start;
+    s.shrink_titles = true;
     s.pad_x = 20;
     s.pad_y = 3;
     s.spacing = 0;

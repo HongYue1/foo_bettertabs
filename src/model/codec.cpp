@@ -210,6 +210,8 @@ enum SettingId : std::uint16_t {
     s_ctrl_tab = 35,
     s_max_tab_width = 36,
     s_switch_ms = 37,
+    s_chevron_position = 38,
+    s_shrink_titles = 39,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -250,6 +252,8 @@ void write_settings(Writer& w, const Settings& s) {
     field_u8(w, s_ctrl_tab, s.ctrl_tab ? 1 : 0);
     field_u16(w, s_max_tab_width, s.max_tab_width);
     field_u16(w, s_switch_ms, s.switch_ms);
+    field_u8(w, s_chevron_position, static_cast<std::uint8_t>(s.chevron_position));
+    field_u8(w, s_shrink_titles, s.shrink_titles ? 1 : 0);
 }
 
 //! Returns false for an id this build does not know.
@@ -294,6 +298,8 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_ctrl_tab: read_bool(v, s.ctrl_tab); return true;
     case s_max_tab_width: read_u16(v, s.max_tab_width); return true;
     case s_switch_ms: read_u16(v, s.switch_ms); return true;
+    case s_chevron_position: read_enum(v, s.chevron_position, ChevronPosition::start); return true;
+    case s_shrink_titles: read_bool(v, s.shrink_titles); return true;
     default: return false;
     }
 }

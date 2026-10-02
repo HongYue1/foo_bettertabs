@@ -29,6 +29,8 @@ struct StripLayoutInput {
     int spacing{0};
     //! Length of the overflow chevron, used only when the tabs do not fit.
     int chevron{0};
+    //! Which end of the strip the chevron sits at.
+    ChevronPosition chevron_position{ChevronPosition::end};
     //! Natural length of each tab: text plus padding.
     std::span<const int> extents;
     //! Kept on screen when the tabs overflow. no_index = none.

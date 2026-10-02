@@ -26,6 +26,19 @@ splitter tab stayed empty (fixed in 0.5.1, `TabsCore::activate`). Show and hide 
 with `ShowWindow`, as Columns UI's Tab stack does. `test/showwindow_test.cpp` proves the
 message behaviour. The strip and hot zone are our own windows and may keep using SWP flags.
 
+### Auto-hide windows must stay the topmost children
+
+The hot zone and the overlay strip only work while they are above every panel window in our
+z-order. Two things put a panel above them without telling us: `SetParent` back into the
+container (places it on top) and a panel's own `SetWindowPos(HWND_TOP)`. Windows sends the parent
+no message and **no `EVENT_OBJECT_REORDER`** for either (`test/zorder_test.cpp`). Visualisations
+with their own fullscreen mode can do the first when leaving it, which made the strip impossible to reveal (fixed in 0.5.3). `TabsCore` watches
+`EVENT_OBJECT_PARENTCHANGE` (one out-of-context hook per process, only while a hot zone exists)
+and re-raises in `WM_SETCURSOR` as a fallback for the second. Verified not to bury the hot zone:
+D3D11 flip and blt swap chains on the panel, recreating them, toggling the main window topmost.
+Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest`), or
+`CreateWindowEx(WS_EX_LAYERED)` on a child fails and the test proves nothing.
+
 ### Divider colour in Columns UI
 
 - Row/Column splitters are transparent: the gaps between their panels (the dividers) show what

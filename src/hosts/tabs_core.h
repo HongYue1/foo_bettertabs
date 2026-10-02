@@ -244,8 +244,16 @@ protected:
     void ah_on_timer(UINT_PTR id) noexcept;
     //! A tab chosen by the user: the strip shows (if hidden) and stays at least linger_ms.
     void ah_note_switch() noexcept;
-    //! Keeps the strip and hot zone above the panels (a new panel window is created on top).
+    //! Keeps the strip and hot zone above the panels when something got above them: a new panel
+    //! window is created on top, and so is one put back with SetParent (a visualisation leaving
+    //! its own fullscreen mode). A no-op while they are already the topmost children.
     void ah_raise() noexcept;
+    //! Another child window is above the strip or the hot zone (hidden ones included).
+    [[nodiscard]] bool ah_covered() const noexcept;
+    //! Installs or removes the process-wide reparenting watch: on while any hot zone exists.
+    static void ah_sync_parent_watch() noexcept;
+    static void CALLBACK ah_on_parent_change(HWINEVENTHOOK hook, DWORD event, HWND wnd, LONG object, LONG child,
+                                             DWORD thread, DWORD time) noexcept;
     [[nodiscard]] int ah_px(unsigned dip) const noexcept;
 
     Settings settings_{};

@@ -241,7 +241,10 @@ const std::vector<TabsCore*>& TabsCore::live() noexcept { return live_list(); }
 
 TabsCore::TabsCore() { live_list().push_back(this); }
 
-TabsCore::~TabsCore() { std::erase(live_list(), this); }
+TabsCore::~TabsCore() {
+    std::erase(live_list(), this);
+    ah_sync_parent_watch();
+}
 
 // ---------------------------------------------------------------------------------------------
 // Configuration.
@@ -860,6 +863,12 @@ bool TabsCore::core_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& r
                 return true;
             }
             break;
+        case WM_SETCURSOR:
+            // Fallback for a panel that raised itself by z-order alone (SetWindowPos(HWND_TOP)),
+            // which raises no event at all: the pointer moving over it reaches us here, because
+            // DefWindowProc asks the parent first. Never handled, so the cursor is unchanged.
+            if (auto_hide() && reinterpret_cast<HWND>(wp) != wnd) ah_raise();
+            break;
         case WM_SETFOCUS:
             if (active_ != nullptr && active_->wnd != nullptr) {
                 SetFocus(active_->wnd);
@@ -973,6 +982,7 @@ void TabsCore::on_destroy() noexcept {
     ah_progress_ = 0.0f;
     menu_pin_ = false;
     hot_zone_.destroy();
+    ah_sync_parent_watch();
     strip_.destroy();
     strip_shown_ = false;
     if (cover_subscribed_) {
@@ -1631,12 +1641,14 @@ void TabsCore::ah_update_mode() noexcept {
         ah_shown_ = false;
         ah_progress_ = 0.0f;
         hot_zone_.destroy();
+        ah_sync_parent_watch();
         (void)strip_.set_layered(false);
         return;
     }
     // Child layered windows are Windows 8+. Ask for the invisible hot zone there; if Windows
     // grants it, the strip can be layered too and go over the panel.
     if (hot_zone_.hwnd() == nullptr) (void)hot_zone_.create(self, *this, gfx::layered_children_supported());
+    ah_sync_parent_watch();
     hot_zone_.set_colour(background_);
     const bool want_layered = settings_.reveal_mode == RevealMode::overlay && hot_zone_.layered();
     if (!strip_.set_layered(want_layered) && want_layered) log::warn("auto-hide: the strip could not be layered; pushing the panel instead");
@@ -1647,14 +1659,64 @@ void TabsCore::ah_update_mode() noexcept {
     }
 }
 
-void TabsCore::ah_raise() noexcept {
+bool TabsCore::ah_covered() const noexcept {
     const HWND self = core_wnd();
-    if (self == nullptr) return;
-    // Hot zone, then strip, so the strip ends up first; only when something got above them.
+    if (self == nullptr) return false;
+    const HWND strip = strip_.hwnd();
+    const HWND zone = hot_zone_.hwnd();
+    int pending = (strip != nullptr ? 1 : 0) + (zone != nullptr ? 1 : 0);
+    // Ours must be the first children in z-order. Hidden ones count: a hot zone left under a
+    // panel while the strip is shown would be just as dead once it is shown again.
+    for (HWND wnd = GetWindow(self, GW_CHILD); wnd != nullptr && pending > 0; wnd = GetWindow(wnd, GW_HWNDNEXT)) {
+        if (wnd != strip && wnd != zone) return true;
+        --pending;
+    }
+    return false;
+}
+
+void TabsCore::ah_raise() noexcept {
+    if (!ah_covered()) return;
+    // Hot zone, then strip, so the strip ends up first.
     for (const HWND wnd : {hot_zone_.hwnd(), strip_.hwnd()}) {
-        if (wnd == nullptr || !IsWindowVisible(wnd)) continue;
-        if (GetWindow(self, GW_CHILD) == wnd) continue;
+        if (wnd == nullptr) continue;
         SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+}
+
+// SetParent puts the window on top of its new siblings, and nothing tells the parent: no
+// message, no EVENT_OBJECT_REORDER (test/zorder_test.cpp). Visualisations with their own
+// fullscreen mode may reparent their window to a monitor-sized popup and back, which left it
+// over the hot zone, so the strip could no longer be revealed. EVENT_OBJECT_PARENTCHANGE does report it. One out-of-context hook for
+// the process, only while some container has a hot zone; the callback runs from our message
+// loop after the reparenting call has returned.
+namespace {
+HWINEVENTHOOK g_parent_watch = nullptr;
+#ifndef EVENT_OBJECT_PARENTCHANGE
+constexpr DWORD EVENT_OBJECT_PARENTCHANGE = 0x800F;
+#endif
+} // namespace
+
+void TabsCore::ah_sync_parent_watch() noexcept {
+    bool wanted = false;
+    for (const TabsCore* core : live()) wanted = wanted || core->hot_zone_.hwnd() != nullptr;
+    if (wanted && g_parent_watch == nullptr) {
+        g_parent_watch = SetWinEventHook(EVENT_OBJECT_PARENTCHANGE, EVENT_OBJECT_PARENTCHANGE, nullptr,
+                                         &TabsCore::ah_on_parent_change, GetCurrentProcessId(), 0,
+                                         WINEVENT_OUTOFCONTEXT);
+        if (g_parent_watch == nullptr) log::warn("auto-hide: could not watch for panels being reparented");
+    } else if (!wanted && g_parent_watch != nullptr) {
+        UnhookWinEvent(g_parent_watch);
+        g_parent_watch = nullptr;
+    }
+}
+
+void CALLBACK TabsCore::ah_on_parent_change(HWINEVENTHOOK, DWORD event, HWND wnd, LONG object, LONG, DWORD,
+                                            DWORD) noexcept {
+    if (event != EVENT_OBJECT_PARENTCHANGE || object != OBJID_WINDOW || wnd == nullptr) return;
+    const HWND parent = GetAncestor(wnd, GA_PARENT);
+    if (parent == nullptr) return;
+    for (TabsCore* core : live()) {
+        if (core->core_wnd() == parent && core->hot_zone_.hwnd() != nullptr) core->ah_raise();
     }
 }
 

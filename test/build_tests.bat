@@ -1,5 +1,5 @@
 @echo off
-rem Builds and runs the offline tests (codec, strip layout, cover accent, strip render, WM_SHOWWINDOW).
+rem Builds and runs the offline tests (codec, strip layout, cover accent, strip render, WM_SHOWWINDOW, z-order).
 rem Output: test\tests.out; render PNGs in test\out\render_*.png
 setlocal
 call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
@@ -16,6 +16,8 @@ cl %CL_FLAGS% /Fe:out\render_test.exe render_test.cpp ..\src\strip\strip_window.
 if errorlevel 1 (type out\build_render.txt & exit /b 1)
 cl %CL_FLAGS% /Fe:out\showwindow_test.exe showwindow_test.cpp /link /SUBSYSTEM:CONSOLE user32.lib > out\build_showwindow.txt 2>&1
 if errorlevel 1 (type out\build_showwindow.txt & exit /b 1)
+cl %CL_FLAGS% /Fe:out\zorder_test.exe zorder_test.cpp /link /SUBSYSTEM:CONSOLE /MANIFEST:EMBED /MANIFESTINPUT:compat.manifest user32.lib > out\build_zorder.txt 2>&1
+if errorlevel 1 (type out\build_zorder.txt & exit /b 1)
 echo == codec == > tests.out
 out\codec_test.exe >> tests.out 2>&1
 set E1=%ERRORLEVEL%
@@ -31,5 +33,8 @@ set E4=%ERRORLEVEL%
 echo == showwindow == >> tests.out
 out\showwindow_test.exe >> tests.out 2>&1
 set E5=%ERRORLEVEL%
-echo EXIT=%E1% %E2% %E3% %E4% %E5% >> tests.out
+echo == zorder == >> tests.out
+out\zorder_test.exe >> tests.out 2>&1
+set E6=%ERRORLEVEL%
+echo EXIT=%E1% %E2% %E3% %E4% %E5% %E6% >> tests.out
 type tests.out

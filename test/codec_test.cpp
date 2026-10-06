@@ -34,8 +34,8 @@ Settings odd_settings() {
     s.spacing = 0;
     s.thickness = 40;
     s.visibility = StripVisibility::auto_hide;
-    s.indicator = Indicator::pill;
-    s.accent_source = AccentSource::custom;
+    s.indicator = Indicator::tab_outline;
+    s.accent_source = AccentSource::highlight;
     s.accent_argb = 0xFF102030u;
     s.corner_radius = 9;
     s.chip = true;

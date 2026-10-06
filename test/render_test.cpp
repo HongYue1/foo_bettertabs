@@ -57,6 +57,7 @@ public:
     void on_strip_metrics_changed() noexcept override {}
     void on_strip_middle_click(std::size_t) noexcept override {}
     void on_strip_reorder(std::size_t, std::size_t) noexcept override {}
+    void on_strip_reorder_block(std::span<const std::size_t>, std::size_t, bool) noexcept override {}
 };
 
 struct Canvas {
@@ -120,6 +121,8 @@ struct Look {
     SideText side{SideText::horizontal};
     //! 0 labels only, 1 icon + label, 2 icons only.
     int icons{0};
+    //! Ctrl+click tabs 3 and 4 (with the active tab 1): the selection look.
+    bool select{false};
 };
 
 //! Fluent/MDL2 code points, and one emoji (U+1F3B5) through the label font's fallback.
@@ -140,6 +143,14 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         {"dark pill", true, Indicator::pill, false, 3, 560},
         {"dark chips", true, Indicator::underline, true, no_index, 560},
         {"dark overflow", true, Indicator::underline, false, no_index, 300},
+        {"dark tab", true, Indicator::tab, false, 3, 560},
+        {"dark outlined tab", true, Indicator::tab_outline, false, 3, 560},
+        {"light tab", false, Indicator::tab, false, no_index, 560},
+        {"light outlined tab", false, Indicator::tab_outline, false, 2, 560},
+        {"dark tab + selection", true, Indicator::tab, false, no_index, 560, StripPosition::top,
+         SideText::horizontal, 0, true},
+        {"light outline + sel.", false, Indicator::tab_outline, false, no_index, 560, StripPosition::top,
+         SideText::horizontal, 0, true},
         {"light underline", false, Indicator::underline, false, no_index, 560},
         {"light pill", false, Indicator::pill, false, 1, 560},
         {"light chips", false, Indicator::none, true, no_index, 560},
@@ -149,7 +160,7 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
     const std::vector<Look> sides = {
         {"dark left", true, Indicator::underline, false, 1, 260, StripPosition::left, SideText::horizontal},
         {"dark left rotated", true, Indicator::pill, false, no_index, 400, StripPosition::left, SideText::rotated},
-        {"light right rotated", false, Indicator::underline, false, no_index, 400, StripPosition::right,
+        {"light right rotated", false, Indicator::tab_outline, false, no_index, 400, StripPosition::right,
          SideText::rotated},
         {"dark left icons only", true, Indicator::pill, false, no_index, 260, StripPosition::left,
          SideText::horizontal, 2},
@@ -213,6 +224,18 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         const int w = horizontal ? px(look.width_dip) : strip.thickness();
         const int h = horizontal ? strip.thickness() : px(look.width_dip);
         SetWindowPos(strip.hwnd(), nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        if (look.select) {
+            for (const std::size_t i : {std::size_t{3}, std::size_t{4}}) {
+                const RECT r = strip.tab_bounds(i);
+                SendMessageW(strip.hwnd(), WM_LBUTTONDOWN, MK_CONTROL | MK_LBUTTON,
+                             MAKELPARAM((r.left + r.right) / 2, (r.top + r.bottom) / 2));
+                SendMessageW(strip.hwnd(), WM_LBUTTONUP, MK_CONTROL, MAKELPARAM((r.left + r.right) / 2, (r.top + r.bottom) / 2));
+            }
+            if (strip.selection_count() != 3) {
+                std::printf("  %-22s selection %zu, expected 3\n", look.name, strip.selection_count());
+                ++failures;
+            }
+        }
         if (look.hover != no_index) {
             const RECT r = strip.tab_bounds(look.hover);
             SendMessageW(strip.hwnd(), WM_MOUSEMOVE, 0, MAKELPARAM((r.left + r.right) / 2, (r.top + r.bottom) / 2));
@@ -264,6 +287,111 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
     return failures;
 }
 
+class DragListener : public NullListener {
+public:
+    std::vector<std::size_t> moved;
+    std::size_t neighbour{no_index};
+    bool before{true};
+    int blocks{0};
+    int singles{0};
+    void on_strip_reorder(std::size_t, std::size_t) noexcept override { ++singles; }
+    void on_strip_reorder_block(std::span<const std::size_t> m, std::size_t n, bool b) noexcept override {
+        moved.assign(m.begin(), m.end());
+        neighbour = n;
+        before = b;
+        ++blocks;
+    }
+};
+
+//! Dragging a selected tab moves the selection as a block.
+int block_drag_test(HWND parent) {
+    int failures = 0;
+    const auto check = [&failures](bool ok, const char* what) {
+        std::printf("%s  block drag: %s\n", ok ? "ok  " : "FAIL", what);
+        if (!ok) ++failures;
+    };
+    DragListener listener;
+    StripWindow strip;
+    if (!strip.create(parent, listener)) return 1;
+    strip.set_dpi_override(96);
+    strip.set_settings(Settings{});
+    StripFont font;
+    font.family = L"Segoe UI";
+    font.size_dip = 12.0f;
+    strip.set_font(font);
+    std::vector<std::wstring> names;
+    for (wchar_t c = L'A'; c < L'A' + 6; ++c) names.push_back(std::wstring(L"Tab ") + c);
+    strip.set_labels(names, 0);
+    SetWindowPos(strip.hwnd(), nullptr, 0, 0, 900, strip.thickness(), SWP_NOZORDER | SWP_NOACTIVATE);
+    const auto centre = [&strip](std::size_t i) {
+        const RECT r = strip.tab_bounds(i);
+        return MAKELPARAM((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    };
+    const auto click = [&strip](LPARAM at, WPARAM keys) {
+        SendMessageW(strip.hwnd(), WM_LBUTTONDOWN, keys | MK_LBUTTON, at);
+        SendMessageW(strip.hwnd(), WM_LBUTTONUP, keys, at);
+    };
+    click(centre(1), MK_CONTROL);
+    click(centre(3), MK_CONTROL);
+    check(strip.selection_count() == 3, "tabs 0, 1, 3 selected");
+    // Grab tab 3 and drag it past the last tab: [2 4 5 0 1 3].
+    const RECT grabbed = strip.tab_bounds(3);
+    const RECT last = strip.tab_bounds(5);
+    const int y = (grabbed.top + grabbed.bottom) / 2;
+    SendMessageW(strip.hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, centre(3));
+    check(strip.selection_count() == 3, "pressing a selected tab keeps the selection");
+    SendMessageW(strip.hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(grabbed.left + 20, y));
+    SendMessageW(strip.hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(last.right + 400, y));
+    check(strip.dragging(), "dragging");
+    SendMessageW(strip.hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(last.right + 400, y));
+    check(listener.blocks == 1 && listener.singles == 0, "one block reorder");
+    check(listener.moved == std::vector<std::size_t>{0, 1, 3}, "moved 0, 1, 3");
+    check(listener.neighbour == 5 && !listener.before, "after tab 5");
+    check(strip.selection_count() == 3, "the selection stays after the drag");
+    // The host makes it real and sends the tabs in the new order.
+    const std::vector<std::wstring> moved_names = {names[2], names[4], names[5], names[0], names[1], names[3]};
+    strip.set_labels(moved_names, 3);
+    check(strip.selection_count() == 3 && strip.is_selected(3) && strip.is_selected(4) && strip.is_selected(5),
+          "the selection follows the moved tabs");
+    // Escape cancels: the order comes back, nothing is reported.
+    const RECT before_drag = strip.tab_bounds(4);
+    SendMessageW(strip.hwnd(), WM_LBUTTONDOWN, MK_LBUTTON, centre(4));
+    SendMessageW(strip.hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(before_drag.left - 20, y));
+    SendMessageW(strip.hwnd(), WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(2, y));
+    check(strip.dragging(), "dragging again");
+    SendMessageW(strip.hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+    SendMessageW(strip.hwnd(), WM_LBUTTONUP, 0, MAKELPARAM(2, y));
+    check(listener.blocks == 1 && !strip.dragging(), "Esc cancels");
+    const RECT back = strip.tab_bounds(4);
+    check(back.left == before_drag.left && back.right == before_drag.right && strip.is_selected(3) &&
+              strip.is_selected(4) && strip.is_selected(5),
+          "Esc restores the order");
+    // A click on empty strip space ends the selection.
+    {
+        RECT client{};
+        GetClientRect(strip.hwnd(), &client);
+        const RECT end = strip.tab_bounds(5);
+        if (client.right - end.right > 4) {
+            click(MAKELPARAM(client.right - 2, (client.top + client.bottom) / 2), 0);
+            check(strip.selection_count() == 0, "a click on empty space clears the selection");
+        } else {
+            check(false, "no empty space to click");
+        }
+    }
+    click(centre(1), MK_CONTROL);
+    check(strip.selection_count() == 2, "Ctrl+click selects again");
+    SendMessageW(strip.hwnd(), WM_KEYDOWN, VK_ESCAPE, 0);
+    check(strip.selection_count() == 0, "Esc clears the selection");
+    click(centre(1), MK_CONTROL);
+    click(centre(2), MK_SHIFT);
+    check(strip.selection_count() == 2, "Shift+click selects a range");
+    // A plain click on a selected tab ends the selection on release.
+    click(centre(1), 0);
+    check(strip.selection_count() == 0, "a click clears the selection");
+    strip.destroy();
+    return failures;
+}
+
 } // namespace
 
 int main() {
@@ -285,6 +413,7 @@ int main() {
     NullListener listener;
     int failures = 0;
     for (const unsigned dpi : {96u, 144u, 192u}) failures += render_dpi(dpi, parent, listener);
+    failures += block_drag_test(parent);
     DestroyWindow(parent);
     gfx::shutdown();
     CoUninitialize();

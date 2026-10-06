@@ -73,3 +73,16 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
   it would outside Better Tabs.
 - Columns UI only. The Default UI container is unchanged (its host leaves `layout` unset, so it
   falls back to the panel background).
+
+### Selection and block drag (0.6)
+
+- Strip items have no keys: the selection is a flag per item and the Shift anchor is an index.
+  `set_labels` keeps the selection by index, so after a reorder the host must rebuild the strip in
+  the new order (`TabsCore::on_strip_reorder_block` does) and the selection follows the moved tabs.
+- A drag of a selected tab moves the whole selection; each item remembers `Item::drag_origin` so Esc
+  can restore the order. The end reports `on_strip_reorder_block(moved, neighbour, before)` with
+  original indices. Drags stay inside the visible window (`StripLayout::group_of`).
+- Esc during a drag is caught by a short timer polling `GetAsyncKeyState` (the strip has no focus
+  while capturing); the timer runs only while dragging.
+- The strip background is exactly the host background (no dark-mode lift).
+- Tab / outlined-tab indicators share `tab_shape()` with Enhanced Playlist Tabs; keep them in sync.

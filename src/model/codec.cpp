@@ -268,8 +268,8 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_spacing: read_u16(v, s.spacing); return true;
     case s_thickness: read_u16(v, s.thickness); return true;
     case s_visibility: read_enum(v, s.visibility, StripVisibility::auto_hide); return true;
-    case s_indicator: read_enum(v, s.indicator, Indicator::none); return true;
-    case s_accent_source: read_enum(v, s.accent_source, AccentSource::cover); return true;
+    case s_indicator: read_enum(v, s.indicator, Indicator::tab_outline); return true;
+    case s_accent_source: read_enum(v, s.accent_source, AccentSource::highlight); return true;
     case s_accent_argb: read_u32(v, s.accent_argb); return true;
     case s_corner_radius: read_u16(v, s.corner_radius); return true;
     case s_chip: read_bool(v, s.chip); return true;

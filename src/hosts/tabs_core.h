@@ -71,6 +71,8 @@ struct HostColours {
     COLORREF background{RGB(255, 255, 255)};
     COLORREF text{RGB(0, 0, 0)};
     COLORREF selection{RGB(0, 120, 215)};
+    //! Default UI: the highlight colour. Columns UI: the active item frame.
+    COLORREF highlight{RGB(0, 120, 215)};
     //! What transparent children (splitters) show through, so the gaps between their panels -
     //! the dividers - look as they do elsewhere in the host's layout. Unset: `background`.
     std::optional<COLORREF> layout;
@@ -127,6 +129,8 @@ protected:
     virtual void host_font(StripFont& font, StripTextOptions& options) const noexcept = 0;
     //! "Columns UI" or "Default UI", for menu and dialog wording.
     [[nodiscard]] virtual const wchar_t* host_ui_name() const noexcept = 0;
+    //! The UI's own name for HostColours::highlight, after host_ui_name().
+    [[nodiscard]] virtual const wchar_t* host_highlight_name() const noexcept = 0;
     //! A created child became the shown tab (true) or stopped being it (false).
     virtual void host_child_shown(Tab&, bool) noexcept {}
     //! The child's own menu items for the strip menu, ids in [first, last). True if any.
@@ -220,6 +224,8 @@ protected:
     void on_strip_metrics_changed() noexcept override;
     void on_strip_middle_click(std::size_t index) noexcept override;
     void on_strip_reorder(std::size_t from, std::size_t to) noexcept override;
+    void on_strip_reorder_block(std::span<const std::size_t> moved, std::size_t neighbour,
+                                bool before) noexcept override;
     void on_strip_pointer() noexcept override;
     void on_strip_paint_failed(const char* detail) noexcept override;
     // HotZoneListener
@@ -269,6 +275,8 @@ protected:
 
     StripWindow strip_;
     std::vector<std::size_t> visible_; // strip index -> tabs_ index
+    //! The tabs of a multiple selection while the tab menu is open.
+    std::vector<Tab*> selected_for_menu_;
     std::vector<StripItem> items_;
     //! The tabs as the open Configure dialog numbers them (TabEdit::id).
     std::vector<Tab*> config_tabs_;

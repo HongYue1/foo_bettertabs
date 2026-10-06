@@ -40,6 +40,8 @@ enum TabCommand : unsigned {
     cmd_move_back,
     cmd_move_forward,
     cmd_configure,
+    cmd_hide_selected,
+    cmd_clear_selection,
 };
 constexpr unsigned menu_unhide_base = 3100;
 //! The Appearance submenu (until the Configure dialog in M(c), and kept as quick access after).
@@ -55,8 +57,11 @@ enum StyleCommand : unsigned {
     style_indicator_underline,
     style_indicator_pill,
     style_indicator_none,
+    style_indicator_tab,
+    style_indicator_tab_outline,
     style_chip,
     style_accent_selection,
+    style_accent_highlight,
     style_accent_cover,
     style_accent_custom,
     style_sizing_fit,
@@ -1062,12 +1067,11 @@ void TabsCore::refresh_colours() noexcept {
         theme.dark = colours.dark;
         theme.active_fill = static_cast<float>(settings_.accent_strength) / 100.0f;
 
-        // The strip's own background: the host's (lifted in dark mode by the strip), a custom
-        // colour, or the panel with some accent mixed in. Light or dark follows what is drawn.
+        // The strip's own background: exactly the host's, a custom colour, or the panel with some
+        // accent mixed in. Light or dark follows what is drawn.
         std::uint32_t bg = colour::rgb_from_colorref(panel);
         if (settings_.strip_background == StripBackground::custom) {
             bg = settings_.background_argb & 0xFFFFFFu;
-            theme.lift = false;
             theme.dark = colour::lightness(bg) < colour::light_background_lightness;
         }
         const auto mix = [](std::uint32_t a, std::uint32_t b, float t) {
@@ -1085,6 +1089,7 @@ void TabsCore::refresh_colours() noexcept {
         // the user's choice and are only nudged when they would vanish.
         std::uint32_t accent = colour::rgb_from_colorref(colours.selection);
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
+        if (settings_.accent_source == AccentSource::highlight) accent = colour::rgb_from_colorref(colours.highlight);
         std::optional<std::uint32_t> cover_raw;
         if (settings_.accent_source == AccentSource::cover) {
             cover_raw = cover::current();
@@ -1093,15 +1098,11 @@ void TabsCore::refresh_colours() noexcept {
         accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
 
         if (settings_.strip_background == StripBackground::accent_tint) {
-            // Tint what the strip would have shown (dark mode's lift included), then make sure
-            // the accent still stands out from its own tint.
-            const std::uint32_t text = colour::rgb_from_colorref(theme.text);
-            const std::uint32_t base = theme.dark ? mix(text, bg, 0.04f) : bg;
-            bg = mix(accent, base, static_cast<float>(settings_.tint_strength) / 100.0f);
-            theme.lift = false;
+            // Tint the background, then make sure the accent still stands out from its own tint.
+            bg = mix(accent, bg, static_cast<float>(settings_.tint_strength) / 100.0f);
             accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
         }
-        if (!theme.lift) {
+        if (settings_.strip_background != StripBackground::theme) {
             theme.text = colour::colorref_from_rgb(
                 colour::with_min_contrast(colour::rgb_from_colorref(theme.text), bg, 4.5f));
         }
@@ -1292,6 +1293,38 @@ void TabsCore::on_strip_reorder(std::size_t from, std::size_t to) noexcept {
     }
 }
 
+void TabsCore::on_strip_reorder_block(std::span<const std::size_t> moved, std::size_t neighbour,
+                                      bool before) noexcept {
+    // `moved` and `neighbour` index visible_, which still holds the order before the drag.
+    try {
+        if (neighbour >= visible_.size()) return rebuild_strip();
+        const std::size_t target = visible_[neighbour];
+        std::vector<bool> moving(tabs_.size(), false);
+        for (const std::size_t si : moved) {
+            if (si >= visible_.size() || visible_[si] == target || visible_[si] >= tabs_.size()) {
+                return rebuild_strip();
+            }
+            moving[visible_[si]] = true;
+        }
+        // The block next to the target, in strip order; hidden tabs in between keep their place.
+        std::vector<std::unique_ptr<Tab>> order;
+        order.reserve(tabs_.size());
+        const auto put_block = [&] {
+            for (const std::size_t si : moved) order.push_back(std::move(tabs_[visible_[si]]));
+        };
+        for (std::size_t i = 0; i < tabs_.size(); ++i) {
+            if (moving[i]) continue;
+            if (i == target && before) put_block();
+            order.push_back(std::move(tabs_[i]));
+            if (i == target && !before) put_block();
+        }
+        tabs_.swap(order);
+    } catch (const std::exception& e) {
+        log::warn(std::string("moving tabs failed: ") + e.what());
+    }
+    rebuild_strip();
+}
+
 void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items,
                                   bool with_style) noexcept {
     const HWND self = core_wnd();
@@ -1317,7 +1350,23 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
         std::vector<Tab*> hidden;
         if (with_style) {
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            if (clicked != nullptr) {
+            // Right-click on a tab of a multiple selection: commands for the selection.
+            std::vector<Tab*> selected;
+            if (clicked != nullptr && strip_.is_selected(strip_index) && strip_.selection_count() >= 2) {
+                std::vector<std::size_t> picked;
+                strip_.selection(picked);
+                for (const std::size_t si : picked) {
+                    if (si < snapshot.size()) selected.push_back(tabs_[snapshot[si]].get());
+                }
+            }
+            if (selected.size() >= 2) {
+                // The last visible tab always stays.
+                const UINT all = selected.size() >= snapshot.size() ? MF_GRAYED : 0;
+                const std::wstring hide = L"Hide " + std::to_wstring(selected.size()) + L" tabs";
+                AppendMenuW(menu, MF_STRING | all, cmd_hide_selected, hide.c_str());
+                AppendMenuW(menu, MF_STRING, cmd_clear_selection, L"Clear selection");
+                selected_for_menu_ = std::move(selected);
+            } else if (clicked != nullptr) {
                 const bool side =
                     settings_.position == StripPosition::left || settings_.position == StripPosition::right;
                 const UINT first = strip_index == 0 ? MF_GRAYED : 0;
@@ -1373,6 +1422,14 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
                 }
                 break;
             case cmd_configure: run_configure(self); break;
+            case cmd_hide_selected:
+                // By tab, not index: each hide rebuilds the strip. set_tab_hidden keeps the last one.
+                for (Tab* t : selected_for_menu_) {
+                    if (index_of(t) != no_index) set_tab_hidden(t, true);
+                }
+                strip_.clear_selection();
+                break;
+            case cmd_clear_selection: strip_.clear_selection(); break;
             default: break;
             }
         } else if (cmd >= menu_tab_base && cmd < menu_cmd_base) {
@@ -1384,6 +1441,7 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
         log::warn(std::string("tab menu failed: ") + e.what());
     }
     if (menu != nullptr) DestroyMenu(menu);
+    selected_for_menu_.clear();
     host_child_menu_done();
 }
 
@@ -1434,6 +1492,8 @@ void TabsCore::append_style_menu(HMENU menu) const noexcept {
     if (HMENU m = sub(L"Active tab"); m != nullptr) {
         radio(m, style_indicator_underline, L"Underline", s.indicator == Indicator::underline);
         radio(m, style_indicator_pill, L"Pill", s.indicator == Indicator::pill);
+        radio(m, style_indicator_tab, L"Tab", s.indicator == Indicator::tab);
+        radio(m, style_indicator_tab_outline, L"Outlined tab", s.indicator == Indicator::tab_outline);
         radio(m, style_indicator_none, L"Text only", s.indicator == Indicator::none);
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(m, MF_STRING | (s.chip ? MF_CHECKED : 0), style_chip, L"Chips");
@@ -1441,12 +1501,15 @@ void TabsCore::append_style_menu(HMENU menu) const noexcept {
     if (HMENU m = sub(L"Accent colour"); m != nullptr) {
         const std::wstring text = std::wstring(host_ui_name()) + L" selection colour";
         radio(m, style_accent_selection, text.c_str(), s.accent_source == AccentSource::selection);
+        const std::wstring highlight = std::wstring(host_ui_name()) + L" " + host_highlight_name();
+        radio(m, style_accent_highlight, highlight.c_str(), s.accent_source == AccentSource::highlight);
         radio(m, style_accent_cover, L"From the playing cover", s.accent_source == AccentSource::cover);
         radio(m, style_accent_custom, L"Custom...", s.accent_source == AccentSource::custom);
     }
     if (HMENU m = sub(L"Accent strength"); m != nullptr) {
         // Opacity of the active tab's fill; the underline is always solid.
-        const UINT grey = s.indicator == Indicator::pill || s.chip ? 0 : MF_GRAYED;
+        const bool filled = s.indicator == Indicator::pill || s.indicator == Indicator::tab;
+        const UINT grey = filled ? 0 : MF_GRAYED;
         const auto level = [&](unsigned id, const wchar_t* text, bool on) {
             radio(m, id, text, on);
             if (grey != 0) EnableMenuItem(m, id, MF_BYCOMMAND | MF_GRAYED);
@@ -1505,8 +1568,11 @@ void TabsCore::run_style_command(unsigned command) noexcept {
     case style_indicator_underline: s.indicator = Indicator::underline; break;
     case style_indicator_pill: s.indicator = Indicator::pill; break;
     case style_indicator_none: s.indicator = Indicator::none; break;
+    case style_indicator_tab: s.indicator = Indicator::tab; break;
+    case style_indicator_tab_outline: s.indicator = Indicator::tab_outline; break;
     case style_chip: s.chip = !s.chip; break;
     case style_accent_selection: s.accent_source = AccentSource::selection; break;
+    case style_accent_highlight: s.accent_source = AccentSource::highlight; break;
     case style_accent_cover: s.accent_source = AccentSource::cover; break;
     case style_accent_custom: {
         if (!pick_colour(s.accent_argb)) return;
@@ -1549,6 +1615,7 @@ bool TabsCore::run_configure(HWND parent) {
     ConfigureState original;
     original.settings = settings_;
     original.ui_name = host_ui_name();
+    original.highlight_name = host_highlight_name();
     try {
         config_tabs_.clear();
         for (std::size_t i = 0; i < tabs_.size(); ++i) {

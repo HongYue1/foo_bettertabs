@@ -48,6 +48,13 @@ struct StripLayout {
     std::size_t last{0};
     bool overflow{false};
     Span chevron;
+    //! Tab `index` is placed (inside the visible window).
+    [[nodiscard]] bool shows(std::size_t index) const noexcept { return index >= first && index < last; }
+    //! The tabs a dragged tab can trade places with: the visible window.
+    void group_of(std::size_t, std::size_t& lo, std::size_t& hi) const noexcept {
+        lo = first;
+        hi = last;
+    }
 };
 
 //! Reuses `out`'s storage.

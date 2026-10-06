@@ -370,12 +370,15 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_ALIGN), {L"Start", L"Centre", L"End"});
     // Order matters: ChevronPosition.
     fill_combo(control(IDC_CHEVRON), {L"At the end of the strip", L"At the start of the strip"});
-    fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only"});
+    // Order matters: Indicator, one for one.
+    fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only", L"Tab", L"Outlined tab"});
     // Order matters: AccentSource and StripBackground, one for one.
     const std::wstring ui = state_.ui_name != nullptr ? state_.ui_name : L"Columns UI";
     const std::wstring ui_selection = ui + L" selection colour";
     const std::wstring ui_background = ui + L" background";
-    fill_combo(control(IDC_ACCENT_SOURCE), {ui_selection.c_str(), L"Custom colour", L"From the playing cover"});
+    const std::wstring ui_highlight = ui + L" " + (state_.highlight_name != nullptr ? state_.highlight_name : L"");
+    fill_combo(control(IDC_ACCENT_SOURCE),
+               {ui_selection.c_str(), L"Custom colour", L"From the playing cover", ui_highlight.c_str()});
     fill_combo(control(IDC_BACKGROUND), {ui_background.c_str(), L"Custom colour", L"Tinted with the accent"});
     fill_combo(control(IDC_MIDDLE), {L"Does nothing", L"Hides the tab"});
 
@@ -576,8 +579,8 @@ void ConfigureDialog::update_enabled() {
     const Settings& s = state_.settings;
     enable(IDC_ROTATE, s.position == StripPosition::left || s.position == StripPosition::right);
     enable(IDC_ALIGN, s.sizing != TabSizing::fill);
-    // The strength is the opacity of a fill, which only the pill and chips have.
-    const bool fill = s.indicator == Indicator::pill || s.chip;
+    // The strength is the opacity of the accent fill, which only the pill and the tab have.
+    const bool fill = s.indicator == Indicator::pill || s.indicator == Indicator::tab;
     enable(IDC_STRENGTH_AUTO, fill);
     enable(IDC_STRENGTH, fill && s.accent_strength != 0);
     enable(IDC_STRENGTH_VALUE, fill && s.accent_strength != 0);

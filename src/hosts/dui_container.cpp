@@ -205,6 +205,7 @@ protected:
     HostColours host_colours() const noexcept override;
     void host_font(StripFont& font, StripTextOptions& options) const noexcept override;
     const wchar_t* host_ui_name() const noexcept override { return L"Default UI"; }
+    const wchar_t* host_highlight_name() const noexcept override { return L"highlight colour"; }
     void host_child_shown(Tab& tab, bool shown) noexcept override;
     bool host_strip_menu(std::size_t index, POINT screen) noexcept override;
     void host_tab_key(HWND from) noexcept override;
@@ -569,6 +570,7 @@ HostColours DuiContainer::host_colours() const noexcept {
         out.background = callback_->query_std_color(ui_color_background);
         out.text = callback_->query_std_color(ui_color_text);
         out.selection = callback_->query_std_color(ui_color_selection);
+        out.highlight = callback_->query_std_color(ui_color_highlight);
         out.dark = callback_->is_dark_mode();
     } catch (...) {
     }

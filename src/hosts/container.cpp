@@ -125,6 +125,7 @@ protected:
     HostColours host_colours() const noexcept override;
     void host_font(StripFont& font, StripTextOptions& options) const noexcept override;
     const wchar_t* host_ui_name() const noexcept override { return L"Columns UI"; }
+    const wchar_t* host_highlight_name() const noexcept override { return L"active item frame"; }
     bool host_child_menu(Tab& tab, HMENU menu, unsigned first, unsigned last) noexcept override;
     void host_child_menu_command(unsigned id) noexcept override;
     void host_child_menu_done() noexcept override { menu_hook_.release(); }
@@ -391,6 +392,7 @@ HostColours TabsContainer::host_colours() const noexcept {
         out.background = colours.get_colour(cui::colours::colour_background);
         out.text = colours.get_colour(cui::colours::colour_text);
         out.selection = colours.get_colour(cui::colours::colour_selection_background);
+        out.highlight = colours.get_colour(cui::colours::colour_active_item_frame);
         out.dark = colours.is_dark_mode_active();
         // Columns UI's layout background (dark::ColourID::LayoutBackground, not in the SDK):
         // what its splitters' dividers show. Their width is Columns UI's own setting
@@ -703,7 +705,7 @@ public:
     void get_name(pfc::string_base& out) const override { out = BETTERTABS_NAME; }
     uint32_t get_supported_colours() const override {
         return cui::colours::colour_flag_background | cui::colours::colour_flag_text |
-               cui::colours::colour_flag_selection_background;
+               cui::colours::colour_flag_selection_background | cui::colours::colour_flag_active_item_frame;
     }
     uint32_t get_supported_bools() const override { return cui::colours::bool_flag_dark_mode_enabled; }
     bool get_themes_supported() const override { return false; }

@@ -13,16 +13,20 @@
 - **Works in both UIs.** A splitter in Columns UI and a container element in the Default UI. The
   same strip, menus and settings in both.
 - **Strip on any side.** Top, bottom, left or right. Side strips can rotate their titles.
-- **Look.** Underline, pill or text-only indicator, optional chips, corner radius, tab width (fit the
+- **Look.** Underline, pill, tab, outlined tab or text-only indicator, optional chips, corner radius, tab width (fit the
   title, all equal or fill the strip) and alignment. Tabs can have an icon (Segoe Fluent Icons or
   emoji) and can show the icon only.
-- **Accent colour** from the UI selection colour, a custom colour, or the playing track's cover. The
+- **Accent colour** from the UI selection colour, the UI highlight colour (Default UI) or active
+  item frame colour (Columns UI), a custom colour, or the playing track's cover. The
   strip background can follow the UI, be custom, or be tinted with the accent.
 - **Titles** are the panel's own name, your text, or title formatting.
 - **Auto-hide.** The strip appears when the pointer reaches a thin hot zone at the edge, over the
   panel or pushing it aside, with an optional slide or fade.
 - **Switching.** Click, mouse wheel, Ctrl+Tab / Ctrl+Shift+Tab, the tab list, or automatically when
   playback starts or stops. Drag tabs to reorder them. Hide tabs you rarely use.
+- **Multi-select.** Ctrl+click toggles a tab, Shift+click selects a range. Drag a selected tab to
+  move the whole selection as one block (Esc cancels the drag). Click empty strip space or press Esc
+  to clear the selection.
 - **Light on resources.** Panels are created the first time their tab is shown, nothing runs while
   idle, and only the strip is painted. See [Performance](#performance).
 
@@ -73,6 +77,7 @@ Right-click the strip (in both UIs):
 | Tab list | Switch to any tab |
 | Rename... | Give the tab a title. Empty means the panel's own name |
 | Hide tab | Hide the tab from the strip |
+| Hide N tabs / Clear selection | With several tabs selected: hide them all, or drop the selection |
 | Move left / right | Reorder (up / down on side strips) |
 | Show hidden tab | Switch to a hidden tab |
 | Appearance | Strip position, active tab, accent colour, accent strength, strip background, tab width, show strip |
@@ -89,7 +94,7 @@ Settings belong to each container. Changes show immediately; **Cancel** undoes t
 | Page | What is in it |
 | --- | --- |
 | Strip | Position (top, bottom, left, right); thickness in DIPs (0 = from the font); rotate text on side strips |
-| Look | Tab width (fit the title, all equal, fill the strip) and alignment; overflow chevron at the end or the start; shorten titles to fit before showing the chevron (off by default); longest title before the ellipsis; padding and spacing; indicator (underline, pill, text only), chips, corner radius, fill strength; accent (UI selection colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) |
+| Look | Tab width (fit the title, all equal, fill the strip) and alignment; overflow chevron at the end or the start; shorten titles to fit before showing the chevron (off by default); longest title before the ellipsis; padding and spacing; indicator (underline, pill, tab, outlined tab, text only), chips, corner radius, fill strength; accent (UI selection colour, UI highlight / active item frame colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) |
 | Tabs | The tabs in order (move up, move down, remove). Per tab: title (optionally title formatting, see **Help**), icon, hide this tab, show when playback starts, show when playback stops |
 | Behaviour | Show the strip (always, only with two or more tabs, auto-hide, never); animate switches and their length; mouse wheel switches; drag to reorder; Ctrl+Tab; middle click (nothing or hide tab); create panels lazily; remember the active tab; icon-only tabs |
 | Auto-hide | Reveal over the panel (fastest) or push the panel aside; animation (none, slide, fade) and length; hot zone size; delays before showing and hiding; how long the strip stays after a switch |
@@ -114,7 +119,7 @@ Preferences > Advanced > Display:
 - A switch is one `DeferWindowPos` batch: show the new panel, hide the old one. Nothing else is moved
   or repainted.
 - No timers, hooks or polling while idle. Auto-hide is event driven (`TrackMouseEvent`); a timer runs
-  only while a delay is due or an animation plays.
+  only while a delay is due, an animation plays, or a tab drag is in progress (to catch Esc).
 - Only the strip is painted: double-buffered, dirty rectangles only, and no heap allocations in
   `WM_PAINT` (checked by the render test).
 - Measured on a 150 ms switch animation: about 11 strip paints, the slowest about 1 ms, no
@@ -164,7 +169,8 @@ to `user-components\foo_bettertabs\` for 32-bit) and restart foobar2000.
 - `layout_test`: tab positions for each width mode and alignment, and overflow.
 - `accent_test`: the accent picked from synthetic covers.
 - `render_test`: renders the strip offline, times it, counts allocations in the paint path and
-  writes PNGs to `test\out\`.
+  writes PNGs to `test\out\`. Also checks multi-select and block drag (reorder report, Esc cancel,
+  clearing the selection).
 
 ### Source map
 

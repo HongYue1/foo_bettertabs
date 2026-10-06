@@ -29,6 +29,8 @@ struct ConfigureState {
     std::vector<TabEdit> tabs;
     //! "Columns UI" or "Default UI": the host's colours in the combo boxes.
     const wchar_t* ui_name{L"Columns UI"};
+    //! That UI's name for its highlight colour ("highlight colour", "active item frame").
+    const wchar_t* highlight_name{L"active item frame"};
 };
 
 class ConfigureTarget {

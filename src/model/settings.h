@@ -15,8 +15,11 @@ enum class TabAlign : std::uint8_t { start, centre, end };
 //! Which end of the strip the overflow chevron sits at.
 enum class ChevronPosition : std::uint8_t { end, start };
 enum class StripVisibility : std::uint8_t { always, never, two_or_more, auto_hide };
-enum class Indicator : std::uint8_t { underline, pill, none };
-enum class AccentSource : std::uint8_t { selection, custom, cover };
+//! tab: the fill runs to the strip's edge facing the panel, rounded on the far side only.
+//! tab_outline: the same shape as a solid outline over a faint fill.
+enum class Indicator : std::uint8_t { underline, pill, none, tab, tab_outline };
+//! highlight: Default UI's highlight colour, Columns UI's active item frame.
+enum class AccentSource : std::uint8_t { selection, custom, cover, highlight };
 enum class StripBackground : std::uint8_t { theme, custom, accent_tint };
 //! remove_tab is reserved (read as hide_tab): removing a panel by a stray click is too easy.
 enum class MiddleClick : std::uint8_t { nothing, hide_tab, remove_tab };

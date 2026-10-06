@@ -301,7 +301,33 @@ private:
     void check(int id, bool on) const {
         ::SendMessageW(control(id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
     }
-    void enable(int id, bool on) const { ::EnableWindow(control(id), on ? TRUE : FALSE); }
+    //! Enables a control; on a change, repaints the page behind it (see repaint_behind).
+    void enable(int id, bool on) const {
+        const HWND w = control(id);
+        if (w == nullptr || (::IsWindowEnabled(w) != FALSE) == on) return;
+        ::EnableWindow(w, on ? TRUE : FALSE);
+        repaint_behind(w);
+    }
+    //! Sets a label's text only when it changes, then repaints the page behind it.
+    void set_label(int id, const wchar_t* text) const {
+        const HWND w = control(id);
+        if (w == nullptr) return;
+        wchar_t current[64]{};
+        ::GetWindowTextW(w, current, 64);
+        if (std::wcscmp(current, text) == 0) return;
+        ::SetWindowTextW(w, text);
+        repaint_behind(w);
+    }
+    //! Dark mode draws static text on a transparent background, so a static repainted on its own
+    //! (new text, enabled or disabled) draws over its old glyphs, which pile up into a bold,
+    //! fringed look. Erasing the page behind it first draws it once, cleanly.
+    static void repaint_behind(HWND w) {
+        const HWND page = ::GetParent(w);
+        RECT r{};
+        ::GetWindowRect(w, &r);
+        ::MapWindowPoints(HWND_DESKTOP, page, reinterpret_cast<POINT*>(&r), 2);
+        ::RedrawWindow(page, &r, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    }
     [[nodiscard]] LRESULT selection(int id) const { return ::SendMessageW(control(id), CB_GETCURSEL, 0, 0); }
     void select(int id, int index) const { ::SendMessageW(control(id), CB_SETCURSEL, static_cast<WPARAM>(index), 0); }
     [[nodiscard]] std::uint16_t number(int id) const;
@@ -570,9 +596,9 @@ void ConfigureDialog::settings_from_controls() {
 void ConfigureDialog::update_values() {
     wchar_t text[16]{};
     std::swprintf(text, 16, L"%d%%", slider(IDC_STRENGTH));
-    ::SetWindowTextW(control(IDC_STRENGTH_VALUE), checked(IDC_STRENGTH_AUTO) ? L"" : text);
+    set_label(IDC_STRENGTH_VALUE, checked(IDC_STRENGTH_AUTO) ? L"" : text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_TINT));
-    ::SetWindowTextW(control(IDC_TINT_VALUE), text);
+    set_label(IDC_TINT_VALUE, text);
 }
 
 void ConfigureDialog::update_enabled() {

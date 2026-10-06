@@ -86,3 +86,10 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
   while capturing); the timer runs only while dragging.
 - The strip background is exactly the host background (no dark-mode lift).
 - Tab / outlined-tab indicators share `tab_shape()` with Enhanced Playlist Tabs; keep them in sync.
+
+### Dialog labels in dark mode
+
+Static text is drawn on a transparent background in dark mode. Change a label's text or enabled
+state only through `set_label` / `enable` in `configure_dialog.cpp`: they skip no-op changes and
+erase the page behind the control first (`repaint_behind`). A plain `SetWindowText` or
+`EnableWindow` piles the new text on the old, which looks bold and fringed (fixed in 0.6.1).

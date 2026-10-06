@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "../model/colour.h"
@@ -790,12 +791,34 @@ bool StripWindow::ensure_target() noexcept {
 }
 
 bool StripWindow::render(const RECT& dirty_in) noexcept {
-    if (!ensure_buffer(width_, height_) || !ensure_target()) return false;
+    const bool measure = perf::enabled();
+    std::uint64_t t = measure ? perf::now() : 0;
+    const auto lap = [&](double& out) {
+        if (!measure) return;
+        const std::uint64_t now = perf::now();
+        out = perf::elapsed_ms(t, now);
+        t = now;
+    };
+    phase_ms_[0] = phase_ms_[1] = phase_ms_[2] = 0.0;
+    if (!ensure_buffer(width_, height_)) {
+        std::snprintf(paint_error_, sizeof(paint_error_), "no back buffer for %dx%d (paint to %ld,%ld)", width_, height_,
+                      dirty_in.right, dirty_in.bottom);
+        return false;
+    }
+    if (!ensure_target()) {
+        std::snprintf(paint_error_, sizeof(paint_error_), "no Direct2D target (factory %s)",
+                      gfx::d2d() != nullptr ? "ok" : "missing");
+        return false;
+    }
     RECT dirty{(std::max)(0L, dirty_in.left), (std::max)(0L, dirty_in.top), (std::min)(dirty_in.right, LONG{width_}),
                (std::min)(dirty_in.bottom, LONG{height_})};
     if (dirty.right <= dirty.left || dirty.bottom <= dirty.top) return true;
 
-    if (FAILED(target_->BindDC(mem_dc_, &dirty))) return false;
+    if (const HRESULT bind = target_->BindDC(mem_dc_, &dirty); FAILED(bind)) {
+        std::snprintf(paint_error_, sizeof(paint_error_), "BindDC failed (0x%08lx)", static_cast<unsigned long>(bind));
+        return false;
+    }
+    lap(phase_ms_[0]);
     origin_x_ = static_cast<float>(dirty.left);
     origin_y_ = static_cast<float>(dirty.top);
     target_->BeginDraw();
@@ -812,8 +835,13 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
         const RECT r = chevron_rect();
         if (intersects(r, dirty)) draw_chevron();
     }
+    lap(phase_ms_[1]);
 
     const HRESULT hr = target_->EndDraw();
+    lap(phase_ms_[2]);
+    if (FAILED(hr)) {
+        std::snprintf(paint_error_, sizeof(paint_error_), "EndDraw failed (0x%08lx)", static_cast<unsigned long>(hr));
+    }
     if (hr == D2DERR_RECREATE_TARGET) {
         brush_.reset();
         target_.reset();
@@ -1126,22 +1154,46 @@ void StripWindow::on_paint() noexcept {
     const HDC dc = BeginPaint(wnd_, &ps);
     if (dc == nullptr) return;
     const RECT& rc = ps.rcPaint;
+    if (sync_size()) {
+        // A size we missed: never paint a layout made for another size.
+        (void)ensure_buffer(width_, height_);
+        relayout();
+    }
     if (rc.right > rc.left && rc.bottom > rc.top) {
         const bool measure = perf::enabled();
         const std::uint64_t start = measure ? perf::now() : 0;
         const std::uint64_t allocations = measure ? perf::allocation_count() : 0;
+        double blit_ms = 0.0;
         if (render(rc)) {
+            const std::uint64_t t_blit = measure ? perf::now() : 0;
             BitBlt(dc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, mem_dc_, rc.left, rc.top, SRCCOPY);
+            if (measure) blit_ms = perf::elapsed_ms(t_blit, perf::now());
+            paint_failures_ = 0;
         } else {
-            // Lost target or no Direct2D: flat background now, a full retry next time.
+            // Lost target or no Direct2D: flat background now and a full retry, but only twice.
+            // Invalidating on every failure painted forever, and a window that always has a
+            // paint pending starves the thread's timers (WM_TIMER comes only when nothing else is
+            // queued): foobar2000 stopped working. The next resize or update tries again.
             const COLORREF previous = SetDCBrushColor(dc, surface_);
             FillRect(dc, &rc, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
             SetDCBrushColor(dc, previous);
-            if (!target_) InvalidateRect(wnd_, nullptr, FALSE);
+            ++paint_failures_;
+            if (paint_failures_ == 1 && listener_ != nullptr) listener_->on_strip_paint_failed(paint_error_);
+            if (!target_ && paint_failures_ <= 2) InvalidateRect(wnd_, nullptr, FALSE);
         }
         if (measure) {
             const auto area = static_cast<std::uint64_t>(rc.right - rc.left) * static_cast<std::uint64_t>(rc.bottom - rc.top);
-            stats_.add(perf::elapsed_ms(start, perf::now()), perf::allocation_count() - allocations, area);
+            const double ms = perf::elapsed_ms(start, perf::now());
+            if (ms > stats_.worst_ms) {
+                stats_.worst_bind_ms = phase_ms_[0];
+                stats_.worst_draw_ms = phase_ms_[1];
+                stats_.worst_flush_ms = phase_ms_[2];
+                stats_.worst_blit_ms = blit_ms;
+                stats_.worst_area = area;
+                stats_.worst_switching = switching_;
+                stats_.worst_at = perf::now();
+            }
+            stats_.add(ms, perf::allocation_count() - allocations, area);
         }
     }
     EndPaint(wnd_, &ps);
@@ -1171,13 +1223,27 @@ void StripWindow::set_dpi_override(unsigned dpi) noexcept {
 }
 
 void StripWindow::on_size(int width, int height) noexcept {
-    check_dpi();
-    if (width == width_ && height == height_) return;
+    // Record the size first: check_dpi() can make the host move us again, and that nested
+    // WM_SIZE must not be overwritten by this older one afterwards. Then trust the window over
+    // the message: Enhanced Playlist Tabs' copy of this strip, inside Better Tabs, once kept
+    // 0 x 0 while its window was 2307 x 44 (no tabs, no back buffer).
+    const bool changed = width != width_ || height != height_;
     width_ = width;
     height_ = height;
-    (void)ensure_buffer(width, height); // here, so WM_PAINT never allocates
+    check_dpi();
+    if (!sync_size() && !changed) return;
+    (void)ensure_buffer(width_, height_); // here, so WM_PAINT never allocates
     relayout();
     InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+bool StripWindow::sync_size() noexcept {
+    RECT rc{};
+    if (wnd_ == nullptr || GetClientRect(wnd_, &rc) == FALSE) return false;
+    if (rc.right == width_ && rc.bottom == height_) return false;
+    width_ = rc.right;
+    height_ = rc.bottom;
+    return true;
 }
 
 void StripWindow::on_mouse_move(POINT pt) noexcept {

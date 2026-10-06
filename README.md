@@ -44,6 +44,11 @@ Add **Better Tabs** from Preferences > Columns UI > Layout (it is listed under *
 remove and reorder its panels there; each panel is one tab. Live layout editing works as well, and
 FCL export and import keep the container's settings.
 
+Size limits: Better Tabs is at least as large as its largest panel's minimum and may grow up to the
+largest panel maximum. A page with a smaller maximum (for example an empty Playlist tabs) keeps its
+own maximum size at the top left instead of shrinking the whole container. Columns UI's Tab stack
+uses the smallest maximum instead.
+
 ### Default UI
 
 In layout editing mode, add **Better Tabs** from *Containers*. It starts with one empty tab; click

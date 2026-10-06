@@ -26,6 +26,15 @@ struct PaintStats {
     double total_ms{0.0};
     double worst_ms{0.0};
     std::uint64_t pixels{0};
+    //! The worst paint's phases (Direct2D bind, drawing, EndDraw, copy to the screen) and size.
+    double worst_bind_ms{0.0};
+    double worst_draw_ms{0.0};
+    double worst_flush_ms{0.0};
+    double worst_blit_ms{0.0};
+    std::uint64_t worst_area{0};
+    bool worst_switching{false};
+    //! perf::now() when the worst paint ended.
+    std::uint64_t worst_at{0};
 
     void add(double ms, std::uint64_t allocations, std::uint64_t area) noexcept {
         ++paints;

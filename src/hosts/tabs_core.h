@@ -189,6 +189,8 @@ protected:
     [[nodiscard]] bool want_strip() const noexcept;
     void layout() noexcept;
     [[nodiscard]] Limits compute_limits() const noexcept;
+    //! Where a page goes: the content area, capped at the page's maximum size.
+    [[nodiscard]] RECT child_rect(const Tab& tab) const noexcept;
     void limits_changed() noexcept;
     //! After settings_ changed at run time: clamp, push to the strip, lay out again.
     void apply_settings() noexcept;
@@ -219,6 +221,7 @@ protected:
     void on_strip_middle_click(std::size_t index) noexcept override;
     void on_strip_reorder(std::size_t from, std::size_t to) noexcept override;
     void on_strip_pointer() noexcept override;
+    void on_strip_paint_failed(const char* detail) noexcept override;
     // HotZoneListener
     void on_hot_zone(bool inside, bool clicked) noexcept override;
     // ConfigureTarget

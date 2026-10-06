@@ -26,6 +26,26 @@ splitter tab stayed empty (fixed in 0.5.1, `TabsCore::activate`). Show and hide 
 with `ShowWindow`, as Columns UI's Tab stack does. `test/showwindow_test.cpp` proves the
 message behaviour. The strip and hot zone are our own windows and may keep using SWP flags.
 
+### Size limits: largest maximum, page capped to its own
+
+`TabsCore::compute_limits` reports min = the largest min of the created tabs and max = the
+**largest** max (0.5.4). Columns UI's Tab stack uses the smallest max, so one empty Playlist tabs
+(max height = its tab row, or 0) collapsed the whole container to a few pixels. A page whose max is
+smaller than the container is placed at its max size at the top left (`TabsCore::child_rect`, used
+by `activate` and layout). Uncreated tabs do not count.
+
+### Strip paint failures and first-paint cost
+
+- A failed paint (lost target, no Direct2D) fills the background and invalidates for a full retry
+  at most twice, then waits for the next resize or update; the first failure is logged
+  (`on_strip_paint_failed`). Invalidating on every failure painted forever and starved the
+  thread's `WM_TIMER`s: foobar2000 stopped working (seen in Enhanced Playlist Tabs).
+- `sync_size()` re-reads `GetClientRect` in `WM_SIZE` and `WM_PAINT`: the strip once kept 0 x 0
+  while its window was 2307 x 44, so it never painted a layout for another size.
+- The first `BindDC` of the DC render target costs about 20 ms (cold Direct2D init, once per
+  process, at start-up). The switch log's worst-paint breakdown (bind/draw/EndDraw/copy and how long
+  before the switch) shows this; it is not a switch cost. Warming it on another thread was rejected.
+
 ### Auto-hide windows must stay the topmost children
 
 The hot zone and the overlay strip only work while they are above every panel window in our

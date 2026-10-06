@@ -109,6 +109,8 @@ public:
     //! The pointer entered or left the strip, mouse capture or keyboard focus changed. Auto-hide
     //! re-evaluates on it; nothing else needs it.
     virtual void on_strip_pointer() noexcept {}
+    //! Painting failed (first failure of a run); `detail` says which step, for the log.
+    virtual void on_strip_paint_failed(const char* detail) noexcept { (void)detail; }
 
 protected:
     ~StripListener() = default;
@@ -207,6 +209,8 @@ private:
     LRESULT on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept;
 
     void on_paint() noexcept;
+    //! Takes the client size if width_/height_ disagree with it. True if they changed.
+    bool sync_size() noexcept;
     void on_size(int width, int height) noexcept;
     void on_mouse_move(POINT pt) noexcept;
     void on_mouse_leave() noexcept;
@@ -334,6 +338,11 @@ private:
     com_ptr<ID2D1DCRenderTarget> target_;
     com_ptr<ID2D1SolidColorBrush> brush_;
     bool cleartype_{false};
+    //! Consecutive failed paints, and why the last one failed.
+    unsigned paint_failures_{0};
+    char paint_error_[128]{};
+    //! Perf only: the phases of the last render() (bind, draw, EndDraw), ms.
+    double phase_ms_[3]{};
     //! Top-left of the rectangle being rendered; drawing code works in client pixels.
     float origin_x_{0.0f};
     float origin_y_{0.0f};

@@ -577,12 +577,13 @@ void TabsCore::activate(Tab* next, bool from_user) noexcept {
     // stayed empty (test/showwindow_test.cpp).
     active_ = next; // before showing: a child may ask the host about visibility meanwhile
     if (next != nullptr && next->wnd != nullptr) {
-        if (!same_rect(next->applied, content_)) {
+        const RECT rc = child_rect(*next);
+        if (!same_rect(next->applied, rc)) {
             WindowMoves moves;
-            moves.add(next->wnd, content_, 0);
+            moves.add(next->wnd, rc, 0);
             moves.apply();
         }
-        next->applied = content_;
+        next->applied = rc;
         if ((GetWindowLongPtrW(next->wnd, GWL_STYLE) & WS_VISIBLE) == 0) ShowWindow(next->wnd, SW_SHOWNA);
     }
     if (old != nullptr && old != next && old->wnd != nullptr) ShowWindow(old->wnd, SW_HIDE);
@@ -625,8 +626,25 @@ void TabsCore::activate(Tab* next, bool from_user) noexcept {
         f << ", to first paint " << pfc::format_float(perf::elapsed_ms(t_start, t_painted), 0, 3) << " ms";
         if (strip_stats.paints != 0) {
             f << "; strip: " << pfc::format_uint(strip_stats.paints) << " paints, worst "
-              << pfc::format_float(strip_stats.worst_ms, 0, 3) << " ms, " << pfc::format_uint(strip_stats.pixels)
-              << " px, " << pfc::format_uint(strip_stats.allocating_paints) << " allocating";
+              << pfc::format_float(strip_stats.worst_ms, 0, 3) << " ms";
+            if (strip_stats.worst_ms >= 5.0) {
+                // Which part, and whether it belongs to this switch at all: the stats cover every
+                // paint since the last report, start-up included.
+                if (strip_stats.worst_at != 0 && strip_stats.worst_at < t_start) {
+                    f << " (" << pfc::format_float(perf::elapsed_ms(strip_stats.worst_at, t_start), 0, 1)
+                      << " ms before the switch";
+                } else {
+                    f << " (during the switch";
+                }
+                f << "; bind " << pfc::format_float(strip_stats.worst_bind_ms, 0, 3) << ", draw "
+                  << pfc::format_float(strip_stats.worst_draw_ms, 0, 3) << ", EndDraw "
+                  << pfc::format_float(strip_stats.worst_flush_ms, 0, 3) << ", copy "
+                  << pfc::format_float(strip_stats.worst_blit_ms, 0, 3) << ", "
+                  << pfc::format_uint(strip_stats.worst_area) << " px" << (strip_stats.worst_switching ? ", animating" : "")
+                  << ")";
+            }
+            f << ", " << pfc::format_uint(strip_stats.pixels) << " px, "
+              << pfc::format_uint(strip_stats.allocating_paints) << " allocating";
         }
         if (setredraw) f << " [WM_SETREDRAW]";
         log::info(f.get_ptr());
@@ -751,9 +769,12 @@ void TabsCore::layout() noexcept {
             moves.add(hot_zone_.hwnd(), hot_rc, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE);
         }
     }
-    if (active_ != nullptr && active_->wnd != nullptr && !same_rect(active_->applied, content_)) {
-        active_->applied = content_;
-        moves.add(active_->wnd, content_, 0);
+    if (active_ != nullptr && active_->wnd != nullptr) {
+        const RECT rc = child_rect(*active_);
+        if (!same_rect(active_->applied, rc)) {
+            active_->applied = rc;
+            moves.add(active_->wnd, rc, 0);
+        }
     }
     moves.apply();
     if (ah) ah_raise();
@@ -774,21 +795,45 @@ void TabsCore::layout() noexcept {
     }
 }
 
+RECT TabsCore::child_rect(const Tab& tab) const noexcept {
+    // Within the content area, never larger than the page allows (top left aligned); the rest
+    // shows our background.
+    RECT rc = content_;
+    const auto cap = [](LONG& far_edge, LONG near_edge, unsigned max) {
+        if (max < static_cast<unsigned>(limit_cap) && far_edge - near_edge > static_cast<LONG>(max)) {
+            far_edge = near_edge + static_cast<LONG>(max);
+        }
+    };
+    cap(rc.right, rc.left, tab.limits.max_width);
+    cap(rc.bottom, rc.top, tab.limits.max_height);
+    return rc;
+}
+
 Limits TabsCore::compute_limits() const noexcept {
     Limits out;
     out.min_width = 0;
     out.min_height = 0;
     out.max_width = limit_cap;
     out.max_height = limit_cap;
+    // Every page's minimum, but only the largest page's maximum: the container is as flexible as
+    // its most flexible page, and a page that cannot grow is shown at its maximum (child_rect).
+    // Tab stack takes the smallest maximum instead, so one fixed-height page (an empty Playlist
+    // tabs is just its tab row) squeezed the whole container to that height, on every tab.
+    bool any = false;
+    unsigned max_width = 0;
+    unsigned max_height = 0;
     for (const auto& tab : tabs_) {
         if (tab->wnd == nullptr) continue;
+        any = true;
         out.min_width = (std::max)(out.min_width, tab->limits.min_width);
         out.min_height = (std::max)(out.min_height, tab->limits.min_height);
-        out.max_width = (std::min)(out.max_width, tab->limits.max_width);
-        out.max_height = (std::min)(out.max_height, tab->limits.max_height);
+        max_width = (std::max)(max_width, tab->limits.max_width);
+        max_height = (std::max)(max_height, tab->limits.max_height);
     }
-    out.max_width = (std::max)(out.max_width, out.min_width);
-    out.max_height = (std::max)(out.max_height, out.min_height);
+    if (any) {
+        out.max_width = (std::max)(max_width, out.min_width);
+        out.max_height = (std::max)(max_height, out.min_height);
+    }
     // An auto-hidden strip never counts: showing it must not resize the layout around us.
     if (strip_shown_ && !auto_hide()) {
         const auto t = static_cast<unsigned>((std::max)(0, strip_.thickness()));
@@ -1835,6 +1880,13 @@ void TabsCore::ah_note_switch() noexcept {
 }
 
 void TabsCore::on_strip_pointer() noexcept { ah_evaluate(); }
+
+void TabsCore::on_strip_paint_failed(const char* detail) noexcept {
+    try {
+        log::warn(std::string("the tab strip could not paint: ") + (detail != nullptr ? detail : "?"));
+    } catch (...) {
+    }
+}
 
 void TabsCore::on_hot_zone(bool, bool clicked) noexcept {
     if (clicked && auto_hide() && !ah_shown_) {

@@ -43,6 +43,13 @@ public:
     void on_playback_stop(play_control::t_stop_reason reason) override;
 };
 
+//! A named object instead of the add(std::function) helper: the helper allocates a wrapper that
+//! remove() never frees, so every subscribe/unsubscribe cycle would leak one.
+class ArtWatch : public now_playing_album_art_notify {
+public:
+    void on_album_art(album_art_data::ptr data) override;
+};
+
 struct Cached {
     std::uint64_t hash{0};
     std::optional<std::uint32_t> accent;
@@ -51,7 +58,8 @@ struct Cached {
 struct State {
     std::vector<Listener*> listeners;
     std::unique_ptr<PlayWatch> play;
-    now_playing_album_art_notify* art{nullptr};
+    ArtWatch art;
+    bool art_registered{false};
     std::optional<std::uint32_t> accent;
     std::uint64_t current_hash{0};
     std::uint64_t pending_hash{0};
@@ -137,6 +145,8 @@ void peek() noexcept {
     }
 }
 
+void ArtWatch::on_album_art(album_art_data::ptr data) { deliver(data); }
+
 void PlayWatch::on_playback_new_track(metadb_handle_ptr) {
     State& s = state();
     const std::uint64_t generation = ++s.generation;
@@ -163,7 +173,8 @@ void start() noexcept {
     State& s = state();
     try {
         s.play = std::make_unique<PlayWatch>();
-        s.art = now_playing_album_art_notify_manager::get()->add([](album_art_data::ptr data) { deliver(data); });
+        now_playing_album_art_notify_manager::get()->add(&s.art);
+        s.art_registered = true;
     } catch (const std::exception& e) {
         log::warn(std::string("cover accent unavailable: ") + e.what());
     } catch (...) {
@@ -182,12 +193,12 @@ void start() noexcept {
 
 void stop() noexcept {
     State& s = state();
-    if (s.art != nullptr) {
+    if (s.art_registered) {
         try {
-            now_playing_album_art_notify_manager::get()->remove(s.art);
+            now_playing_album_art_notify_manager::get()->remove(&s.art);
         } catch (...) {
         }
-        s.art = nullptr;
+        s.art_registered = false;
     }
     s.play.reset();
     s.accent.reset();

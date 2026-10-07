@@ -364,6 +364,27 @@ void TabsCore::destroy_tab_window(Tab& tab) noexcept {
     tab.applied = RECT{};
 }
 
+namespace {
+
+//! No track: every field is handled but empty and not found, so it reads as "" instead of "?" and
+//! $if() / [...] take their no-value branch. Functions are left to the core. titleformat_object::run
+//! needs a real hook - the core calls p_source->process_field without a null check, so run(nullptr)
+//! crashed foobar2000 on the first field (playback starting, before the track is open).
+class NoTrackHook : public titleformat_hook {
+public:
+    bool process_field(titleformat_text_out*, const char*, t_size, bool& found) override {
+        found = false;
+        return true;
+    }
+    bool process_function(titleformat_text_out*, const char*, t_size, titleformat_hook_function_params*,
+                          bool& found) override {
+        found = false;
+        return false;
+    }
+};
+
+} // namespace
+
 void TabsCore::update_label(Tab& tab) noexcept {
     try {
         if (tab.extra.use_custom_title && !tab.extra.title.empty()) {
@@ -379,10 +400,18 @@ void TabsCore::update_label(Tab& tab) noexcept {
             }
             pfc::string8 text;
             // The playing track while there is one; otherwise the script runs without a track
-            // (fields read as "?", so $if() and the like can show something else).
+            // (fields are empty, so $if() and the like can show something else).
             if (!playback_control::get()->playback_format_title(nullptr, text, tab.script, nullptr,
                                                                 playback_control::display_level_all)) {
-                tab.script->run(nullptr, text, nullptr);
+                NoTrackHook no_track;
+                tab.script->run(&no_track, text, nullptr);
+                // Nothing playing and the script gave nothing (a plain %title%): the panel's own
+                // name rather than a blank tab. A script with its own fallback text keeps it.
+                if (std::all_of(text.get_ptr(), text.get_ptr() + text.get_length(),
+                                [](char c) { return c == ' ' || c == '\t'; })) {
+                    tab.label = host_child_label(tab);
+                    return;
+                }
             }
             tab.label = widen(text.get_ptr());
             return;

@@ -87,6 +87,15 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
 - The strip background is exactly the host background (no dark-mode lift).
 - Tab / outlined-tab indicators share `tab_shape()` with Enhanced Playlist Tabs; keep them in sync.
 
+### Title formatting without a track: never run(nullptr)
+
+`titleformat_object::run` needs a real `titleformat_hook`: the core calls `p_source->process_field`
+without a null check, so `run(nullptr, ...)` crashes on the first field (read AV at 0 inside
+foobar2000.exe, call path `main_thread_callback::callback_run`). `playback_format_title` returns false
+while playback is starting, before the track is open, which is when the fallback ran (fixed in
+0.6.2). `update_label` passes `NoTrackHook` instead: with no track, fields are empty (not "?") and a
+blank result falls back to the panel's own name; a script with its own `$if()` fallback keeps it.
+
 ### Dialog labels in dark mode
 
 Static text is drawn on a transparent background in dark mode. Change a label's text or enabled

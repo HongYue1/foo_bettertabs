@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <optional>
 
+#include "fbc/cover_accent.h"
+
 namespace bettertabs::cover {
 
 class Listener {
@@ -28,6 +30,8 @@ void unsubscribe(Listener* listener) noexcept;
 
 //! The raw cover colour, 0x00RRGGBB, or nothing (no cover, stopped, not decoded yet).
 [[nodiscard]] std::optional<std::uint32_t> current() noexcept;
+//! Everything known about the cover's colours (primary, secondary, colourfulness), or nothing.
+[[nodiscard]] std::optional<fbc::CoverColours> current_colours() noexcept;
 
 //! On quit: drop every registration.
 void shutdown() noexcept;

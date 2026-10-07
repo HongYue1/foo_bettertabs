@@ -52,7 +52,7 @@ public:
 
 struct Cached {
     std::uint64_t hash{0};
-    std::optional<std::uint32_t> accent;
+    std::optional<fbc::CoverColours> colours;
 };
 
 struct State {
@@ -60,7 +60,7 @@ struct State {
     std::unique_ptr<PlayWatch> play;
     ArtWatch art;
     bool art_registered{false};
-    std::optional<std::uint32_t> accent;
+    std::optional<fbc::CoverColours> colours;
     std::uint64_t current_hash{0};
     std::uint64_t pending_hash{0};
     //! Bumped per track and on teardown; late timers and decodes compare against it.
@@ -74,11 +74,11 @@ State& state() noexcept {
     return s;
 }
 
-void publish(std::optional<std::uint32_t> accent, std::uint64_t hash) noexcept {
+void publish(const std::optional<fbc::CoverColours>& colours, std::uint64_t hash) noexcept {
     State& s = state();
     s.current_hash = hash;
-    if (accent == s.accent) return;
-    s.accent = accent;
+    if (colours == s.colours) return;
+    s.colours = colours;
     // A listener may unsubscribe from inside the callback.
     const std::vector<Listener*> copy = s.listeners;
     for (Listener* listener : copy) {
@@ -88,11 +88,11 @@ void publish(std::optional<std::uint32_t> accent, std::uint64_t hash) noexcept {
     }
 }
 
-void remember(std::uint64_t hash, std::optional<std::uint32_t> accent) {
+void remember(std::uint64_t hash, const std::optional<fbc::CoverColours>& colours) {
     State& s = state();
     std::erase_if(s.cache, [hash](const Cached& c) { return c.hash == hash; });
     if (s.cache.size() >= max_cached) s.cache.erase(s.cache.begin());
-    s.cache.push_back(Cached{hash, accent});
+    s.cache.push_back(Cached{hash, colours});
 }
 
 void offer(std::span<const std::uint8_t> bytes) {
@@ -105,7 +105,7 @@ void offer(std::span<const std::uint8_t> bytes) {
     if (const auto hit = std::ranges::find_if(s.cache, [hash](const Cached& c) { return c.hash == hash; });
         hit != s.cache.end()) {
         s.pending_hash = 0;
-        publish(hit->accent, hash);
+        publish(hit->colours, hash);
         return;
     }
     s.pending_hash = hash;
@@ -113,19 +113,17 @@ void offer(std::span<const std::uint8_t> bytes) {
     // Copied once: the host's buffer is only valid for this call.
     auto encoded = std::make_shared<std::vector<std::uint8_t>>(bytes.begin(), bytes.end());
     fb2k::inCpuWorkerThread([hash, generation, encoded] {
-        std::optional<std::uint32_t> accent;
+        std::optional<fbc::CoverColours> colours;
         try {
-            if (const auto image = decode_image(*encoded, max_edge); image) {
-                if (const auto colours = fbc::cover_colours(*image); colours) accent = colours->primary;
-            }
+            if (const auto image = decode_image(*encoded, max_edge); image) colours = fbc::cover_colours(*image);
         } catch (...) {
         }
-        fb2k::inMainThread([hash, generation, accent] {
+        fb2k::inMainThread([hash, generation, colours] {
             State& st = state();
-            remember(hash, accent);
+            remember(hash, colours);
             if (st.generation != generation || st.pending_hash != hash) return; // superseded
             st.pending_hash = 0;
-            publish(accent, hash);
+            publish(colours, hash);
         });
     });
 }
@@ -181,7 +179,7 @@ void start() noexcept {
     } catch (...) {
         log::warn("cover accent unavailable");
     }
-    s.accent.reset();
+    s.colours.reset();
     s.current_hash = 0;
     s.pending_hash = 0;
     ++s.generation;
@@ -202,7 +200,7 @@ void stop() noexcept {
         s.art_registered = false;
     }
     s.play.reset();
-    s.accent.reset();
+    s.colours.reset();
     s.current_hash = 0;
     s.pending_hash = 0;
     ++s.generation;
@@ -232,7 +230,13 @@ void unsubscribe(Listener* listener) noexcept {
     if (s.listeners.empty()) stop();
 }
 
-std::optional<std::uint32_t> current() noexcept { return state().accent; }
+std::optional<std::uint32_t> current() noexcept {
+    const auto& colours = state().colours;
+    if (!colours) return std::nullopt;
+    return colours->primary;
+}
+
+std::optional<fbc::CoverColours> current_colours() noexcept { return state().colours; }
 
 void shutdown() noexcept {
     state().listeners.clear();

@@ -1121,15 +1121,20 @@ void TabsCore::refresh_colours(bool fade) noexcept {
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
         if (settings_.accent_source == AccentSource::highlight) accent = colour::rgb_from_colorref(colours.highlight);
         std::optional<std::uint32_t> cover_raw;
+        float tint_scale = 1.0f;
         if (settings_.accent_source == AccentSource::cover) {
-            cover_raw = cover::current();
-            if (cover_raw) accent = colour::accent_for_background(*cover_raw, bg);
+            if (const auto cover_colours = cover::current_colours(); cover_colours) {
+                cover_raw = cover_colours->primary;
+                accent = colour::accent_for_background(*cover_raw, bg);
+                // A nearly grey cover tints the background muddy grey-brown: fade the tint out.
+                tint_scale = fbc::tint_weight(cover_colours->colourfulness);
+            }
         }
         accent = colour::with_min_lc(accent, bg, colour::accent_min_lc_for(bg));
 
         if (settings_.strip_background == StripBackground::accent_tint) {
             // Tint the background, then make sure the accent still stands out from its own tint.
-            bg = mix(accent, bg, static_cast<float>(settings_.tint_strength) / 100.0f);
+            bg = mix(accent, bg, tint_scale * static_cast<float>(settings_.tint_strength) / 100.0f);
             accent = colour::with_min_lc(accent, bg, colour::accent_min_lc_for(bg));
         }
         if (settings_.strip_background != StripBackground::theme) {

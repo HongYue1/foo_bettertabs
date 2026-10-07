@@ -18,7 +18,7 @@
   emoji) and can show the icon only.
 - **Accent colour** from the UI selection colour, the UI highlight colour (Default UI) or active
   item frame colour (Columns UI), a custom colour, or the playing track's cover. The
-  strip background can follow the UI, be custom, or be tinted with the accent.
+  strip background can follow the UI, be custom, or be tinted with the accent (a nearly grey cover leaves it untinted).
 - **Titles** are the panel's own name, your text, or title formatting.
 - **Auto-hide.** The strip appears when the pointer reaches a thin hot zone at the edge, over the
   panel or pushing it aside, with an optional slide or fade.

@@ -32,6 +32,9 @@ constexpr UINT_PTR switch_timer = 0xB710;
 //! While dragging: polls Esc, as DoDragDrop does (the strip rarely has the keyboard focus).
 constexpr UINT_PTR drag_timer = 0xB711;
 constexpr UINT drag_poll_ms = 50;
+//! A new cover's colours fade in over this long (Settings::animations).
+constexpr UINT_PTR theme_timer = 0xB712;
+constexpr double theme_fade_ms = 300.0;
 
 [[nodiscard]] HINSTANCE module_instance() noexcept {
     return reinterpret_cast<HINSTANCE>(&__ImageBase);
@@ -151,7 +154,6 @@ constexpr float selected_alpha_dark = 0.16f;
 constexpr float selected_alpha_light = 0.14f;
 //! From this fill opacity on, the active tab's text is chosen for contrast against the fill.
 constexpr float strong_fill = 0.40f;
-constexpr float text_min_contrast = 4.5f;
 constexpr float inactive_text = 0.70f;
 
 } // namespace
@@ -224,6 +226,9 @@ bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
 }
 
 void StripWindow::destroy() noexcept {
+    stop_theme_fade();
+    theme_ = target_theme_;
+    surface_ = theme_.background;
     if (wnd_ != nullptr) DestroyWindow(wnd_);
     wnd_ = nullptr;
     target_.reset();
@@ -242,15 +247,69 @@ void StripWindow::set_settings(const Settings& settings) noexcept {
     if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
 }
 
-void StripWindow::set_theme(const StripTheme& theme) noexcept {
-    if (theme == theme_) return;
-    if (tooltip_ != nullptr && theme.dark != theme_.dark) {
+void StripWindow::set_theme(const StripTheme& theme, bool fade) noexcept {
+    if (theme == target_theme_) return;
+    if (tooltip_ != nullptr && theme.dark != target_theme_.dark) {
         SetWindowTheme(tooltip_, theme.dark ? L"DarkMode_Explorer" : nullptr, nullptr);
     }
+    target_theme_ = theme;
+    if (fade && settings_.animations && wnd_ != nullptr && IsWindowVisible(wnd_) != FALSE) {
+        // From what is on screen now, also when a fade is already running.
+        fade_from_ = theme_;
+        fade_start_ = perf::now();
+        if (fading_ || SetTimer(wnd_, theme_timer, USER_TIMER_MINIMUM, nullptr) != 0) {
+            fading_ = true;
+            return;
+        }
+    }
+    stop_theme_fade();
+    show_theme(theme);
+}
+
+void StripWindow::show_theme(const StripTheme& theme) noexcept {
     theme_ = theme;
     // Exactly the host's background (no dark-mode lift): the strip matches the UI around it.
     surface_ = theme.background;
     if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+}
+
+void StripWindow::stop_theme_fade() noexcept {
+    if (!fading_) return;
+    fading_ = false;
+    if (wnd_ != nullptr) KillTimer(wnd_, theme_timer);
+}
+
+//! One frame of the colour fade: every colour of the theme blended in OKLab, so the strip
+//! passes through the colours between the two covers rather than through a muddy sRGB mix.
+//! Both ends are legible against their own background and lightness moves evenly between
+//! them, so the frames between stay legible too.
+void StripWindow::on_theme_timer() noexcept {
+    if (!fading_) {
+        KillTimer(wnd_, theme_timer);
+        return;
+    }
+    const float p = static_cast<float>(std::clamp(perf::elapsed_ms(fade_start_, perf::now()) / theme_fade_ms, 0.0, 1.0));
+    if (p >= 1.0f) {
+        stop_theme_fade();
+        show_theme(target_theme_);
+        return;
+    }
+    const float t = p * p * (3.0f - 2.0f * p); // smoothstep
+    const auto blend_ref = [t](COLORREF a, COLORREF b) {
+        return static_cast<COLORREF>(colour::colorref_from_rgb(
+            colour::mix(colour::rgb_from_colorref(a), colour::rgb_from_colorref(b), t)));
+    };
+    const StripTheme& a = fade_from_;
+    const StripTheme& b = target_theme_;
+    StripTheme frame = b;
+    frame.background = blend_ref(a.background, b.background);
+    frame.text = blend_ref(a.text, b.text);
+    frame.accent = blend_ref(a.accent, b.accent);
+    if (a.fill_accent != CLR_INVALID || b.fill_accent != CLR_INVALID) {
+        frame.fill_accent = blend_ref(a.fill_accent != CLR_INVALID ? a.fill_accent : a.accent,
+                                      b.fill_accent != CLR_INVALID ? b.fill_accent : b.accent);
+    }
+    show_theme(frame);
 }
 
 void StripWindow::set_text_options(const StripTextOptions& options) noexcept {
@@ -1035,10 +1094,8 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             const COLORREF final_colour = accent_fill_colour(theme_, final_alpha);
             const std::uint32_t under = colour::rgb_from_colorref(blend(final_colour, surface_, final_alpha));
             const std::uint32_t own = colour::rgb_from_colorref(text);
-            if (colour::contrast_ratio(own, under) < text_min_contrast) {
-                text = colour::contrast_ratio(0xFFFFFFu, under) >= colour::contrast_ratio(0x000000u, under)
-                           ? RGB(255, 255, 255)
-                           : RGB(0, 0, 0);
+            if (std::fabs(colour::apca_contrast(own, under)) < colour::text_min_lc) {
+                text = colour::colorref_from_rgb(colour::text_on(under));
             }
         }
         target_->PushAxisAlignedClip(f, D2D1_ANTIALIAS_MODE_ALIASED);
@@ -1137,6 +1194,10 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
     case WM_TIMER:
         if (wp == switch_timer) {
             on_switch_timer();
+            return 0;
+        }
+        if (wp == theme_timer) {
+            on_theme_timer();
             return 0;
         }
         if (wp == drag_timer) {

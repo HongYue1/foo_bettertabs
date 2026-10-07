@@ -71,7 +71,7 @@
       <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(SdkRoot)\foobar2000;$(SdkRoot);..\wtl\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SdkRoot)\foobar2000;$(SdkRoot);..\wtl\Include;..\fb2k-common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- Mandatory for anything compiling SDK headers; without it release-only miscompiles. -->
       <AdditionalOptions>/d2notypeopt %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -113,7 +113,7 @@
     <ClCompile Include="src\hosts\dui_container.cpp" />
     <ClCompile Include="src\hosts\tabs_core.cpp" />
     <ClCompile Include="src\model\codec.cpp" />
-    <ClCompile Include="src\model\cover_accent.cpp" />
+    <ClCompile Include="..\fb2k-common\src\cover_accent.cpp" />
     <ClCompile Include="src\platform\alloc_counter.cpp" />
     <ClCompile Include="src\platform\cover_hub.cpp" />
     <ClCompile Include="src\platform\image_decoder.cpp" />

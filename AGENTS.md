@@ -7,8 +7,11 @@ general rules (file tools, builds through `cmd //c`, v145 toolset, background jo
 
 - Build: `cmd //c build.bat Release x64` and `cmd //c build.bat Release Win32`. Read
   `build.log` / `build-Win32.log`. The build fails on post-Windows 7 imports on purpose.
-- Tests: `cmd //c test\build_tests.bat` (codec, strip layout, cover accent, strip render,
-  WM_SHOWWINDOW). Results in `test/tests.out`; every EXIT code must be 0.
+- Tests: `cmd //c test\build_tests.bat` (codec, strip layout, strip render, WM_SHOWWINDOW,
+  z-order). Results in `test/tests.out`; every EXIT code must be 0.
+- Cover colour and contrast (OKLab, APCA) are in the shared `../fb2k-common` library, with its
+  own tests (`fb2k-common/test/build_tests.bat`, including a golden test over the user's
+  covers). Change them there; EPT, Media Bar and foo_onscreendisplay use the same code.
 - Package: `cmd //c package.bat` -> `dist/foo_bettertabs.fb2k-component` (x86 at the root, x64
   in `x64/`) and `dist/symbols/*.pdb`.
 - Release: bump `src/version.h`, package, archive the PDBs as

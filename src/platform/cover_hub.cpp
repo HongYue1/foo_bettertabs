@@ -115,10 +115,11 @@ void offer(std::span<const std::uint8_t> bytes) {
     fb2k::inCpuWorkerThread([hash, generation, encoded] {
         std::optional<std::uint32_t> accent;
         try {
-            if (const auto image = decode_image(*encoded, max_edge); image) accent = extract_cover_accent(*image);
+            if (const auto image = decode_image(*encoded, max_edge); image) {
+                if (const auto colours = fbc::cover_colours(*image); colours) accent = colours->primary;
+            }
         } catch (...) {
         }
-        if (accent) *accent &= 0xffffffu;
         fb2k::inMainThread([hash, generation, accent] {
             State& st = state();
             remember(hash, accent);

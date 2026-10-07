@@ -1086,7 +1086,7 @@ void TabsCore::fill_background(HDC dc) const noexcept {
     SetDCBrushColor(dc, previous);
 }
 
-void TabsCore::refresh_colours() noexcept {
+void TabsCore::refresh_colours(bool fade) noexcept {
     try {
         const HostColours colours = host_colours();
         const COLORREF panel = colours.background;
@@ -1112,10 +1112,11 @@ void TabsCore::refresh_colours() noexcept {
             return ch(16) | ch(8) | ch(0);
         };
 
-        // Every accent passes a 3:1 contrast floor against the strip. A cover colour is raw, so
-        // it also gets the full legibility treatment (lightness window, chroma floor; the same
-        // code as Media Bar and foo_onscreendisplay). the host's selection colour and a custom colour are
-        // the user's choice and are only nudged when they would vanish.
+        // Every accent clears an APCA contrast floor against the strip (fb2k-common's
+        // colour.h, the same code as Media Bar and foo_onscreendisplay). A cover colour is raw,
+        // so it gets the full treatment (lightness and hue search, chroma floor); the host's
+        // selection colour and a custom colour are the user's choice and are only nudged when
+        // they would vanish.
         std::uint32_t accent = colour::rgb_from_colorref(colours.selection);
         if (settings_.accent_source == AccentSource::custom) accent = settings_.accent_argb & 0xFFFFFFu;
         if (settings_.accent_source == AccentSource::highlight) accent = colour::rgb_from_colorref(colours.highlight);
@@ -1124,29 +1125,29 @@ void TabsCore::refresh_colours() noexcept {
             cover_raw = cover::current();
             if (cover_raw) accent = colour::accent_for_background(*cover_raw, bg);
         }
-        accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
+        accent = colour::with_min_lc(accent, bg, colour::accent_min_lc_for(bg));
 
         if (settings_.strip_background == StripBackground::accent_tint) {
             // Tint the background, then make sure the accent still stands out from its own tint.
             bg = mix(accent, bg, static_cast<float>(settings_.tint_strength) / 100.0f);
-            accent = colour::with_min_contrast(accent, bg, colour::accent_min_contrast);
+            accent = colour::with_min_lc(accent, bg, colour::accent_min_lc_for(bg));
         }
         if (settings_.strip_background != StripBackground::theme) {
             theme.text = colour::colorref_from_rgb(
-                colour::with_min_contrast(colour::rgb_from_colorref(theme.text), bg, 4.5f));
+                colour::with_min_lc(colour::rgb_from_colorref(theme.text), bg, colour::text_min_lc));
         }
         theme.background = colour::colorref_from_rgb(bg);
         theme.accent = colour::colorref_from_rgb(accent);
         if (cover_raw && colour::lightness(bg) >= colour::light_background_lightness) {
             // A solid fill on a light strip: the cover's colour in the light window (yellow stays
             // yellow instead of going olive); the strip picks dark text for it.
-            theme.fill_accent = colour::colorref_from_rgb(colour::accent_for_card(*cover_raw & 0xFFFFFFu, false));
+            theme.fill_accent = colour::colorref_from_rgb(colour::fill_for_cover(*cover_raw, true));
         }
 
         background_ = panel;
         child_background_ = colours.layout.value_or(panel);
         hot_zone_.set_colour(panel);
-        strip_.set_theme(theme);
+        strip_.set_theme(theme, fade);
         if (const HWND self = core_wnd(); self != nullptr) InvalidateRect(self, nullptr, FALSE);
     } catch (...) {
     }
@@ -1169,7 +1170,8 @@ void TabsCore::refresh_font() noexcept {
     }
 }
 
-void TabsCore::on_cover_accent_changed() noexcept { refresh_colours(); }
+//! A new cover: the strip fades to its colours instead of switching at once.
+void TabsCore::on_cover_accent_changed() noexcept { refresh_colours(true); }
 
 void TabsCore::update_cover_subscription() noexcept {
     const bool want = core_wnd() != nullptr && settings_.accent_source == AccentSource::cover;

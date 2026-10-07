@@ -137,6 +137,7 @@ some-folder/
   foo_bettertabs/      this repository
   SDK-2026-09-17/      foobar2000 SDK, with the Columns UI SDK cloned inside as columns_ui-sdk/
   wtl/                 WTL (the folder that contains Include/)
+  fb2k-common/         colour code shared with the author's other components (cover colour, contrast)
 ```
 
 - foobar2000 SDK: <https://www.foobar2000.org/SDK>
@@ -162,15 +163,17 @@ to `user-components\foo_bettertabs\` for 32-bit) and restart foobar2000.
 
 ### Tests (no foobar2000 needed)
 
-`test\build_tests.bat` builds and runs four tests:
+`test\build_tests.bat` builds and runs these tests:
 
 - `codec_test`: settings and tabs survive a round trip, fields from newer versions are kept, and
   damaged data falls back to defaults.
 - `layout_test`: tab positions for each width mode and alignment, and overflow.
-- `accent_test`: the accent picked from synthetic covers.
 - `render_test`: renders the strip offline, times it, counts allocations in the paint path and
   writes PNGs to `test\out\`. Also checks multi-select and block drag (reorder report, Esc cancel,
   clearing the selection).
+- `showwindow_test`, `zorder_test`: the window messages the tab switching relies on.
+
+The cover colour and contrast code has its own tests in `fb2k-common\test\`.
 
 ### Source map
 
@@ -182,7 +185,7 @@ to `user-components\foo_bettertabs\` for 32-bit) and restart foobar2000.
 | `src/hosts/dui_container.cpp` | The Default UI container element |
 | `src/hosts/configure_dialog.cpp` | The Configure dialog |
 | `src/model/settings.cpp`, `codec.cpp` | Settings and their storage |
-| `src/model/cover_accent.cpp`, `colour.h` | Accent colour from the cover |
+| `src/model/cover_accent.h`, `colour.h` | Accent colour from the cover (forwarders to `fb2k-common`) |
 | `src/strip/strip_window.cpp` | The strip: drawing, input, tooltips |
 | `src/strip/strip_layout.cpp` | Tab positions and overflow |
 | `src/strip/hot_zone.cpp` | The auto-hide hot zone |

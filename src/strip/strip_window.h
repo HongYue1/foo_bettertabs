@@ -131,7 +131,9 @@ public:
     [[nodiscard]] HWND hwnd() const noexcept { return wnd_; }
 
     void set_settings(const Settings& settings) noexcept;
-    void set_theme(const StripTheme& theme) noexcept;
+    //! `fade`: blend to it over a few frames (a new cover) when animations are on and the strip
+    //! is visible; otherwise at once.
+    void set_theme(const StripTheme& theme, bool fade = false) noexcept;
     void set_font(const StripFont& font) noexcept;
     void set_text_options(const StripTextOptions& options) noexcept;
     //! Replaces all tabs. Rebuilds the text layouts of the tabs that changed.
@@ -305,11 +307,21 @@ private:
     [[nodiscard]] RECT switch_rect() const noexcept;
     void draw_switch_indicator() noexcept;
 
+    // Colour fade to a new theme (a new cover). theme_ is what is drawn, target_theme_ what was
+    // asked for; they differ only while fading_.
+    void show_theme(const StripTheme& theme) noexcept;
+    void stop_theme_fade() noexcept;
+    void on_theme_timer() noexcept;
+
     HWND wnd_{nullptr};
     StripListener* listener_{nullptr};
 
     Settings settings_{};
     StripTheme theme_{};
+    StripTheme target_theme_{};
+    StripTheme fade_from_{};
+    std::uint64_t fade_start_{0};
+    bool fading_{false};
     StripFont font_{};
     //! No text format is built before the host's first set_font(): it would be thrown away.
     bool font_set_{false};

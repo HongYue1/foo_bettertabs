@@ -536,7 +536,7 @@ void StripWindow::draw_switch_indicator() noexcept {
         }
     }
     if (settings_.indicator == Indicator::underline) {
-        const float bar = static_cast<float>((std::max)(2, px(2)));
+        const float bar = underline_width();
         const float text_inset = static_cast<float>(px(settings_.pad_x)) * 0.5f;
         // Upright side tabs inset the bar like draw_tab does; rotated ones like a top strip.
         const float side_inset = rotated() ? text_inset : inset_along * 2.0f;
@@ -1064,7 +1064,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
 
     const int pad_x = px(settings_.pad_x);
     if (active_look && settings_.indicator == Indicator::underline) {
-        const float bar = static_cast<float>((std::max)(2, px(2)));
+        const float bar = underline_width();
         D2D1_RECT_F u = f;
         const float along_inset = static_cast<float>(pad_x) * 0.5f;
         switch (edge) {

@@ -9,9 +9,10 @@
 // The Configure dialog's pages, consecutive and in tab order.
 #define IDD_PAGE_STRIP 102
 #define IDD_PAGE_LOOK 103
-#define IDD_PAGE_TABS 104
-#define IDD_PAGE_BEHAVIOUR 105
-#define IDD_PAGE_AUTOHIDE 106
+#define IDD_PAGE_FONTS 104
+#define IDD_PAGE_TABS 105
+#define IDD_PAGE_BEHAVIOUR 106
+#define IDD_PAGE_AUTOHIDE 107
 #define IDD_RENAME 110
 
 #define IDC_TABS 1000
@@ -88,3 +89,14 @@
 #define IDC_RENAME_FORMAT 1092
 #define IDC_CHEVRON 1093
 #define IDC_SHRINK 1094
+
+// Look (added later)
+#define IDC_LINE_WIDTH 1212
+
+// Fonts. The fallback rows are consecutive: text, Select and Clear of row 1, 2, 3.
+#define IDC_FONT_TEXT 1200
+#define IDC_FONT_PICK 1201
+#define IDC_FONT_CLEAR 1202
+#define IDC_FALLBACK_TEXT 1203
+#define IDC_FALLBACK_PICK 1206
+#define IDC_FALLBACK_CLEAR 1209

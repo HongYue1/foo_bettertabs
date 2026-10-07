@@ -79,32 +79,64 @@ BEGIN
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
     LTEXT           "Indicator:",IDC_STATIC,12,23,84,8
     COMBOBOX        IDC_INDICATOR,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Show every tab as a chip",IDC_CHIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,37,281,10
-    LTEXT           "Corner radius:",IDC_STATIC,12,53,84,8
-    EDITTEXT        IDC_RADIUS,99,51,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs (0-32)",IDC_STATIC,131,53,162,8
-    LTEXT           "Fill strength:",IDC_STATIC,12,69,84,8
-    CONTROL         "Automatic",IDC_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,68,52,10
-    CONTROL         "",IDC_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,66,108,14
-    LTEXT           "",IDC_STRENGTH_VALUE,265,69,28,8
+    LTEXT           "Line width:",IDC_STATIC,12,39,84,8
+    EDITTEXT        IDC_LINE_WIDTH,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs (0 = automatic, 1-8)",IDC_STATIC,131,39,162,8
+    CONTROL         "Show every tab as a chip",IDC_CHIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,53,281,10
+    LTEXT           "Corner radius:",IDC_STATIC,12,69,84,8
+    EDITTEXT        IDC_RADIUS,99,67,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "DIPs (0-32)",IDC_STATIC,131,69,162,8
+    LTEXT           "Fill strength:",IDC_STATIC,12,85,84,8
+    CONTROL         "Automatic",IDC_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,84,52,10
+    CONTROL         "",IDC_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,82,108,14
+    LTEXT           "",IDC_STRENGTH_VALUE,265,85,28,8
 
-    LTEXT           "Colours",IDC_STATIC,7,90,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,100,286,1
-    LTEXT           "Accent colour:",IDC_STATIC,12,109,84,8
-    COMBOBOX        IDC_ACCENT_SOURCE,99,107,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Custom accent:",IDC_STATIC,12,125,84,8
-    EDITTEXT        IDC_ACCENT_HEX,99,123,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_ACCENT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,123,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,125,122,8
-    LTEXT           "Strip background:",IDC_STATIC,12,141,84,8
-    COMBOBOX        IDC_BACKGROUND,99,139,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Custom background:",IDC_STATIC,12,157,84,8
-    EDITTEXT        IDC_BACKGROUND_HEX,99,155,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_BACKGROUND_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,155,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,157,122,8
-    LTEXT           "Tint strength:",IDC_STATIC,12,173,84,8
-    CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,170,162,14
-    LTEXT           "",IDC_TINT_VALUE,265,173,28,8
+    LTEXT           "Colours",IDC_STATIC,7,106,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,116,286,1
+    LTEXT           "Accent colour:",IDC_STATIC,12,125,84,8
+    COMBOBOX        IDC_ACCENT_SOURCE,99,123,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom accent:",IDC_STATIC,12,141,84,8
+    EDITTEXT        IDC_ACCENT_HEX,99,139,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_ACCENT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,139,24,12
+    LTEXT           "RRGGBB",IDC_STATIC,171,141,122,8
+    LTEXT           "Strip background:",IDC_STATIC,12,157,84,8
+    COMBOBOX        IDC_BACKGROUND,99,155,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom background:",IDC_STATIC,12,173,84,8
+    EDITTEXT        IDC_BACKGROUND_HEX,99,171,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_BACKGROUND_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,171,24,12
+    LTEXT           "RRGGBB",IDC_STATIC,171,173,122,8
+    LTEXT           "Tint strength:",IDC_STATIC,12,189,84,8
+    CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,186,162,14
+    LTEXT           "",IDC_TINT_VALUE,265,189,28,8
+END
+
+IDD_PAGE_FONTS DIALOGEX 0, 0, 300, 218
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Fonts",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LTEXT           "Tab font:",IDC_STATIC,12,23,70,8
+    LTEXT           "",IDC_FONT_TEXT,85,23,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",IDC_FONT_PICK,197,20,46,14
+    PUSHBUTTON      "Default",IDC_FONT_CLEAR,247,20,46,14
+    LTEXT           "Default follows the Columns UI font for these tabs (Colours and fonts), or the Default UI tab font. Picked sizes are exact; tab icons keep their icon font.",IDC_STATIC,12,38,281,16
+
+    LTEXT           "Fallback fonts",IDC_STATIC,7,66,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,76,286,1
+    LTEXT           "Fallback 1:",IDC_STATIC,12,85,70,8
+    LTEXT           "",IDC_FALLBACK_TEXT,85,85,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",IDC_FALLBACK_PICK,197,82,46,14
+    PUSHBUTTON      "Clear",IDC_FALLBACK_CLEAR,247,82,46,14
+    LTEXT           "Fallback 2:",IDC_STATIC,12,103,70,8
+    LTEXT           "",1204,85,103,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",1207,197,100,46,14
+    PUSHBUTTON      "Clear",1210,247,100,46,14
+    LTEXT           "Fallback 3:",IDC_STATIC,12,121,70,8
+    LTEXT           "",1205,85,121,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",1208,197,118,46,14
+    PUSHBUTTON      "Clear",1211,247,118,46,14
+    LTEXT           "Tried in this order for characters the tab font cannot draw. Only the family is used: size, weight and italic follow the tab font. The host's own fallbacks (emoji, then Windows') come after these.",IDC_STATIC,12,136,281,24
 END
 
 IDD_PAGE_TABS DIALOGEX 0, 0, 300, 218

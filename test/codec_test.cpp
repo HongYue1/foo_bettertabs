@@ -35,6 +35,12 @@ Settings odd_settings() {
     s.thickness = 40;
     s.visibility = StripVisibility::auto_hide;
     s.indicator = Indicator::tab_outline;
+    s.line_width = 3;
+    s.font.family = "IBM Plex Sans";
+    s.font.tenths_pt = 105;
+    s.font.weight = 600;
+    s.font.italic = true;
+    s.font.fallbacks = {"IBM Plex Sans JP", "", "Noto Sans Arabic"};
     s.accent_source = AccentSource::highlight;
     s.accent_argb = 0xFF102030u;
     s.corner_radius = 9;

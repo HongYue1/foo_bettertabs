@@ -288,9 +288,15 @@ private:
     void draw_tab(std::size_t index) noexcept;
     //! The indicator is a tab (Indicator::tab, tab_outline): fills run on to the panel edge.
     [[nodiscard]] bool tab_shape() const noexcept;
-    //! Stroke of the outlined tab: 1.5 DIPs in whole pixels.
+    //! Stroke of the outlined tab: Settings::line_width, else 1.5 DIPs, in whole pixels.
     [[nodiscard]] float outline_width() const noexcept {
+        if (settings_.line_width != 0) return static_cast<float>((std::max)(1, px(settings_.line_width)));
         return static_cast<float>((std::max)(1, MulDiv(3, static_cast<int>(dpi_), 192)));
+    }
+    //! Thickness of the underline: Settings::line_width, else 2 DIPs, in whole pixels.
+    [[nodiscard]] float underline_width() const noexcept {
+        if (settings_.line_width != 0) return static_cast<float>((std::max)(1, px(settings_.line_width)));
+        return static_cast<float>((std::max)(2, px(2)));
     }
     void draw_chevron() noexcept;
     //! Opacity of the active tab's accent fill (pill or chip).

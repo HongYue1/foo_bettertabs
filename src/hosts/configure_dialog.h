@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,9 @@ struct ConfigureState {
     const wchar_t* ui_name{L"Columns UI"};
     //! That UI's name for its highlight colour ("highlight colour", "active item frame").
     const wchar_t* highlight_name{L"active item frame"};
+    //! The host's font, for the Fonts page's "Default (...)" row and where its font dialog starts.
+    std::wstring host_font_family;
+    std::uint32_t host_font_tenths{90};
 };
 
 class ConfigureTarget {

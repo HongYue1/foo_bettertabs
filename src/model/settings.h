@@ -4,7 +4,9 @@
 // the offline tests can use it. Stored field by field (codec.cpp), never as a raw struct, so
 // adding a field never invalidates an older layout and an older build can read a newer one.
 
+#include <array>
 #include <cstdint>
+#include <string>
 
 namespace bettertabs {
 
@@ -29,6 +31,20 @@ enum class ShowHideAnimation : std::uint8_t { none, slide, fade };
 //! "No tab" for the follow-playback targets.
 inline constexpr std::uint16_t no_tab = 0xFFFF;
 
+//! The tab font. An empty family follows the host (Columns UI's font for this component, or the
+//! Default UI's tab font). Fallback families are tried in order for characters the font lacks.
+struct TabFont {
+    std::string family;
+    //! Tenths of a point; 0 = the host's size.
+    std::uint16_t tenths_pt{0};
+    //! 0 = regular.
+    std::uint16_t weight{0};
+    bool italic{false};
+    std::array<std::string, 3> fallbacks;
+
+    [[nodiscard]] bool operator==(const TabFont&) const = default;
+};
+
 struct Settings {
     StripPosition position{StripPosition::top};
     //! Rotated since 0.3.1: horizontal text makes a side strip as wide as its longest title.
@@ -49,6 +65,9 @@ struct Settings {
 
     StripVisibility visibility{StripVisibility::always};
     Indicator indicator{Indicator::underline};
+    //! Line of the underline or the outlined tab, in DIPs; 0 = automatic (2 and 1.5).
+    std::uint8_t line_width{0};
+    TabFont font;
     AccentSource accent_source{AccentSource::selection};
     //! 0xAARRGGBB, used when accent_source == custom.
     std::uint32_t accent_argb{0xFF3EA6FFu};

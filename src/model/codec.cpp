@@ -24,6 +24,9 @@ void clamp(Settings& s) noexcept {
     limit(s.linger_ms, 0, 5000);
     if (s.accent_strength != 0) s.accent_strength = std::clamp<std::uint8_t>(s.accent_strength, 5, 100);
     s.tint_strength = std::clamp<std::uint8_t>(s.tint_strength, 2, 60);
+    s.line_width = (std::min)(s.line_width, std::uint8_t{8});
+    if (s.font.tenths_pt != 0) limit(s.font.tenths_pt, 40, 720);
+    limit(s.font.weight, 0, 1000);
 }
 
 namespace {
@@ -212,6 +215,14 @@ enum SettingId : std::uint16_t {
     s_switch_ms = 37,
     s_chevron_position = 38,
     s_shrink_titles = 39,
+    s_line_width = 40,
+    s_font_family = 41,
+    s_font_size = 42,
+    s_font_weight = 43,
+    s_font_italic = 44,
+    s_fallback1 = 45,
+    s_fallback2 = 46,
+    s_fallback3 = 47,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -254,6 +265,14 @@ void write_settings(Writer& w, const Settings& s) {
     field_u16(w, s_switch_ms, s.switch_ms);
     field_u8(w, s_chevron_position, static_cast<std::uint8_t>(s.chevron_position));
     field_u8(w, s_shrink_titles, s.shrink_titles ? 1 : 0);
+    field_u8(w, s_line_width, s.line_width);
+    field_string(w, s_font_family, s.font.family);
+    field_u16(w, s_font_size, s.font.tenths_pt);
+    field_u16(w, s_font_weight, s.font.weight);
+    field_u8(w, s_font_italic, s.font.italic ? 1 : 0);
+    field_string(w, s_fallback1, s.font.fallbacks[0]);
+    field_string(w, s_fallback2, s.font.fallbacks[1]);
+    field_string(w, s_fallback3, s.font.fallbacks[2]);
 }
 
 //! Returns false for an id this build does not know.
@@ -300,6 +319,14 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_switch_ms: read_u16(v, s.switch_ms); return true;
     case s_chevron_position: read_enum(v, s.chevron_position, ChevronPosition::start); return true;
     case s_shrink_titles: read_bool(v, s.shrink_titles); return true;
+    case s_line_width: read_u8(v, s.line_width); return true;
+    case s_font_family: s.font.family.assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
+    case s_font_size: read_u16(v, s.font.tenths_pt); return true;
+    case s_font_weight: read_u16(v, s.font.weight); return true;
+    case s_font_italic: read_bool(v, s.font.italic); return true;
+    case s_fallback1: s.font.fallbacks[0].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
+    case s_fallback2: s.font.fallbacks[1].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
+    case s_fallback3: s.font.fallbacks[2].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
     default: return false;
     }
 }

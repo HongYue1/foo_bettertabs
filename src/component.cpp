@@ -7,6 +7,7 @@
 
 #include "platform/cover_hub.h"
 #include "platform/graphics.h"
+#include "platform/logging.h"
 #include "version.h"
 
 DECLARE_COMPONENT_VERSION(BETTERTABS_NAME, BETTERTABS_VERSION,
@@ -23,6 +24,7 @@ namespace {
 
 class lifecycle : public initquit {
 public:
+    void on_init() override { cover::set_warn(&log::warn); }
     void on_quit() override {
         cover::shutdown();
         gfx::shutdown();

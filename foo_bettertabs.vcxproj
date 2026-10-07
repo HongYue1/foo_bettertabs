@@ -114,9 +114,9 @@
     <ClCompile Include="src\hosts\tabs_core.cpp" />
     <ClCompile Include="src\model\codec.cpp" />
     <ClCompile Include="..\fb2k-common\src\cover_accent.cpp" />
+    <ClCompile Include="..\fb2k-common\src\cover_hub.cpp" />
+    <ClCompile Include="..\fb2k-common\src\image_decoder.cpp" />
     <ClCompile Include="src\platform\alloc_counter.cpp" />
-    <ClCompile Include="src\platform\cover_hub.cpp" />
-    <ClCompile Include="src\platform\image_decoder.cpp" />
     <ClCompile Include="src\platform\graphics.cpp" />
     <ClCompile Include="src\platform\logging.cpp" />
     <ClCompile Include="src\platform\perf.cpp" />

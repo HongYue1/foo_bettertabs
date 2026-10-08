@@ -80,6 +80,11 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
 ### Selection and block drag (0.6)
 
 - Strip items have no keys: the selection is a flag per item and the Shift anchor is an index.
+  `set_items` with a different tab count clears the selection (the indices under it moved), and
+  any change of the active tab resets the anchor to it. Ctrl/Shift+click takes the focus and
+  `clear_selection` gives it back; `WM_KILLFOCUS` ends the selection; the active tab in the
+  selection is outlined regardless of `UISF_HIDEFOCUS`. Same design as
+  foo_enhancedplaylisttabs 1.3.1; `test/render_test.cpp` `selection_test` covers it.
   `set_labels` keeps the selection by index, so after a reorder the host must rebuild the strip in
   the new order (`TabsCore::on_strip_reorder_block` does) and the selection follows the moved tabs.
 - A drag of a selected tab moves the whole selection; each item remembers `Item::drag_origin` so Esc
@@ -105,3 +110,19 @@ Static text is drawn on a transparent background in dark mode. Change a label's 
 state only through `set_label` / `enable` in `configure_dialog.cpp`: they skip no-op changes and
 erase the page behind the control first (`repaint_behind`). A plain `SetWindowText` or
 `EnableWindow` piles the new text on the old, which looks bold and fringed (fixed in 0.6.1).
+
+### Hover styles (Hover page)
+
+- `Settings::hover_*` style only tabs other than the active one; the active tab keeps its old
+  plain wash on hover. `StripWindow::draw_tab` draws the mark (fill, outline via `fill_shape`,
+  which also strokes pills now, or underline) over the tab's own fill (chip, selection).
+- The fade keeps a `hover_level` per `Item` (so it moves with reorders) and is read only while
+  `hover_fading_`; otherwise `index == hover_` decides. Anything that resets `hover_` on an item
+  change must call `stop_hover_fade()`.
+- `render_test` `hover_test` checks each style by pixels and writes `test/out/hover_96.png`. In
+  tests, pump only `WM_TIMER` for the strip: the real pointer is elsewhere, and a posted
+  `WM_MOUSELEAVE` ends the hover.
+- Pages are `IDD_PAGE_STRIP + i`, so the ids stay consecutive: Strip, Look, Hover, Colours, Fonts,
+  then the rest.
+- `save_png` in `render_test` writes 24 bpp BGR: WIC's PNG encoder turns a 32 bpp request into
+  24 bpp, and the 32 bpp rows it was fed before scrambled every image in `test/out`.

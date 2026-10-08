@@ -25,6 +25,10 @@ void clamp(Settings& s) noexcept {
     if (s.accent_strength != 0) s.accent_strength = std::clamp<std::uint8_t>(s.accent_strength, 5, 100);
     s.tint_strength = std::clamp<std::uint8_t>(s.tint_strength, 2, 60);
     s.line_width = (std::min)(s.line_width, std::uint8_t{8});
+    if (s.hover_fill_strength != 0) s.hover_fill_strength = std::clamp<std::uint8_t>(s.hover_fill_strength, 2, 80);
+    s.hover_line_width = (std::min)(s.hover_line_width, std::uint8_t{8});
+    if (s.hover_line_opacity != 0) s.hover_line_opacity = std::clamp<std::uint8_t>(s.hover_line_opacity, 10, 100);
+    limit(s.hover_fade_ms, 50, 1000);
     if (s.font.tenths_pt != 0) limit(s.font.tenths_pt, 40, 720);
     limit(s.font.weight, 0, 1000);
 }
@@ -223,6 +227,15 @@ enum SettingId : std::uint16_t {
     s_fallback1 = 45,
     s_fallback2 = 46,
     s_fallback3 = 47,
+    s_hover_style = 48,
+    s_hover_colour = 49,
+    s_hover_argb = 50,
+    s_hover_fill_strength = 51,
+    s_hover_line_width = 52,
+    s_hover_line_opacity = 53,
+    s_hover_text = 54,
+    s_hover_fade = 55,
+    s_hover_fade_ms = 56,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -273,6 +286,15 @@ void write_settings(Writer& w, const Settings& s) {
     field_string(w, s_fallback1, s.font.fallbacks[0]);
     field_string(w, s_fallback2, s.font.fallbacks[1]);
     field_string(w, s_fallback3, s.font.fallbacks[2]);
+    field_u8(w, s_hover_style, static_cast<std::uint8_t>(s.hover_style));
+    field_u8(w, s_hover_colour, static_cast<std::uint8_t>(s.hover_colour));
+    field_u32(w, s_hover_argb, s.hover_argb);
+    field_u8(w, s_hover_fill_strength, s.hover_fill_strength);
+    field_u8(w, s_hover_line_width, s.hover_line_width);
+    field_u8(w, s_hover_line_opacity, s.hover_line_opacity);
+    field_u8(w, s_hover_text, static_cast<std::uint8_t>(s.hover_text));
+    field_u8(w, s_hover_fade, s.hover_fade ? 1 : 0);
+    field_u16(w, s_hover_fade_ms, s.hover_fade_ms);
 }
 
 //! Returns false for an id this build does not know.
@@ -327,6 +349,15 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_fallback1: s.font.fallbacks[0].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
     case s_fallback2: s.font.fallbacks[1].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
     case s_fallback3: s.font.fallbacks[2].assign(reinterpret_cast<const char*>(v.data()), v.size()); return true;
+    case s_hover_style: read_enum(v, s.hover_style, HoverStyle::none); return true;
+    case s_hover_colour: read_enum(v, s.hover_colour, HoverColour::custom); return true;
+    case s_hover_argb: read_u32(v, s.hover_argb); return true;
+    case s_hover_fill_strength: read_u8(v, s.hover_fill_strength); return true;
+    case s_hover_line_width: read_u8(v, s.hover_line_width); return true;
+    case s_hover_line_opacity: read_u8(v, s.hover_line_opacity); return true;
+    case s_hover_text: read_enum(v, s.hover_text, HoverText::colour); return true;
+    case s_hover_fade: read_bool(v, s.hover_fade); return true;
+    case s_hover_fade_ms: read_u16(v, s.hover_fade_ms); return true;
     default: return false;
     }
 }

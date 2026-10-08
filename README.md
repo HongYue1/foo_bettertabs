@@ -16,6 +16,8 @@
 - **Look.** Underline, pill, tab, outlined tab or text-only indicator, optional chips, corner radius, tab width (fit the
   title, all equal or fill the strip) and alignment. Tabs can have an icon (Segoe Fluent Icons or
   emoji) and can show the icon only.
+- **Hover style.** Hovered tabs can show a fill, an outline (any width, 1-8 DIPs), an underline or
+  combinations, in the text colour, the accent or a custom colour, optionally fading in and out.
 - **Accent colour** from the UI selection colour, the UI highlight colour (Default UI) or active
   item frame colour (Columns UI), a custom colour, or the playing track's cover. The
   strip background can follow the UI, be custom, or be tinted with the accent (a nearly grey cover leaves it untinted).
@@ -93,8 +95,10 @@ Settings belong to each container. Changes show immediately; **Cancel** undoes t
 
 | Page | What is in it |
 | --- | --- |
-| Strip | Position (top, bottom, left, right); thickness in DIPs (0 = from the font); rotate text on side strips |
-| Look | Tab width (fit the title, all equal, fill the strip) and alignment; overflow chevron at the end or the start; shorten titles to fit before showing the chevron (off by default); longest title before the ellipsis; padding and spacing; indicator (underline, pill, tab, outlined tab, text only) and its line width, chips, corner radius, fill strength; accent (UI selection colour, UI highlight / active item frame colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) |
+| Strip | Position (top, bottom, left, right); thickness in DIPs (0 = from the font); rotate text on side strips; tab width (fit the title, all equal, fill the strip) and alignment; overflow chevron at the end or the start; shorten titles to fit before showing the chevron (off by default); longest title before the ellipsis; padding and spacing |
+| Look | Active tab: indicator (underline, pill, tab, outlined tab, text only), its line width and fill strength. Every tab: chips, corner radius |
+| Hover | How a hovered tab other than the active one is marked: fill, outline, outline and fill, underline, underline and fill, or no mark; in the text colour, the accent or a custom colour; the title brightens, stays as it is or takes the hover colour; fill strength, line width and line opacity (each automatic or set); optional fade in and out with its length |
+| Colours | Accent (UI selection colour, UI highlight / active item frame colour, custom, from the playing cover); strip background (UI background, custom, tinted with the accent) and tint strength |
 | Fonts | Tab font (default: the host's font) and up to three fallback fonts for characters it cannot draw |
 | Tabs | The tabs in order (move up, move down, remove). Per tab: title (optionally title formatting, see **Help**), icon, hide this tab, show when playback starts, show when playback stops |
 | Behaviour | Show the strip (always, only with two or more tabs, auto-hide, never); animate switches and their length; mouse wheel switches; drag to reorder; Ctrl+Tab; middle click (nothing or hide tab); create panels lazily; remember the active tab; icon-only tabs |

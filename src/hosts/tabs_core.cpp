@@ -1717,11 +1717,21 @@ bool TabsCore::run_configure(HWND parent) {
     ConfigureState state = original;
     const bool live = core_wnd() != nullptr;
     bool ok = false;
+    const bool pinned = menu_pin_; // already set when opened from the tab menu
+    menu_pin_ = true;              // an auto-hidden strip stays shown while the dialog is open
     try {
-        ok = run_configure_dialog(parent != nullptr ? parent : core_api::get_main_window(), state, *this, live);
+        // Owned by the window the user is in: Columns UI's Layout page passes the main window,
+        // which would put the dialog behind Preferences.
+        HWND owner = GetActiveWindow();
+        if (owner == nullptr || IsWindowEnabled(owner) == FALSE) {
+            owner = parent != nullptr ? GetAncestor(parent, GA_ROOT) : core_api::get_main_window();
+        }
+        ok = run_configure_dialog(owner, state, *this, live);
     } catch (const std::exception& e) {
         log::warn(std::string("the Configure dialog failed: ") + e.what());
     }
+    menu_pin_ = pinned;
+    if (!pinned) ah_evaluate();
     // Cancel puts back what the live preview changed.
     preview(ok ? state : original);
     if (ok) commit_removals();

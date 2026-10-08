@@ -145,6 +145,8 @@ public:
     [[nodiscard]] std::size_t item_count() const noexcept { return items_.size(); }
     //! Multiple selection (Ctrl+click toggles a tab, Shift+click selects a range, a plain click
     //! clears it). Kept by key across set_items() and reorders; never includes the chevron.
+    //! The active tab, or no_index.
+    [[nodiscard]] std::size_t active() const noexcept { return active_; }
     [[nodiscard]] std::size_t selection_count() const noexcept { return selected_count_; }
     [[nodiscard]] bool is_selected(std::size_t index) const noexcept {
         return index < items_.size() && items_[index].selected;
@@ -216,6 +218,8 @@ private:
         int icon_gap{0};
         //! In the multiple selection.
         bool selected{false};
+        //! How far the hover mark has faded in (0..1); read only while hover_fading_.
+        float hover_level{0.0f};
         //! Block drag: the tab's index before the drag.
         std::size_t drag_origin{0};
         //! Built for this font/DPI generation; a newer generation rebuilds the layouts.
@@ -239,6 +243,10 @@ private:
     void set_selected(std::size_t index, bool selected) noexcept;
     //! Recounts selected_count_ after the items changed shape.
     void recount_selection() noexcept;
+    //! Unmarks every selected tab; the focus stays (a Shift+click about to select a new range).
+    void clear_marks() noexcept;
+    //! The selection is empty: hands the keyboard focus back if a Ctrl/Shift+click took it.
+    void release_selection_focus() noexcept;
     void on_button_up(POINT pt) noexcept;
     void on_middle_up(POINT pt) noexcept;
     void drag_to(POINT pt) noexcept;
@@ -298,6 +306,13 @@ private:
         if (settings_.line_width != 0) return static_cast<float>((std::max)(1, px(settings_.line_width)));
         return static_cast<float>((std::max)(2, px(2)));
     }
+    //! 0..1: how strongly tab `index` shows as hovered (eased while the hover fades).
+    [[nodiscard]] float hover_amount(std::size_t index) const noexcept;
+    [[nodiscard]] COLORREF hover_colour() const noexcept;
+    [[nodiscard]] float hover_fill_alpha() const noexcept;
+    [[nodiscard]] float hover_line_alpha() const noexcept;
+    //! Outline (or underline) width of the hover mark, in whole pixels.
+    [[nodiscard]] float hover_line_px(bool underline) const noexcept;
     void draw_chevron() noexcept;
     //! Opacity of the active tab's accent fill (pill or chip).
     [[nodiscard]] float active_fill_alpha() const noexcept;
@@ -318,6 +333,12 @@ private:
     void show_theme(const StripTheme& theme) noexcept;
     void stop_theme_fade() noexcept;
     void on_theme_timer() noexcept;
+
+    // Hover fade (Settings::hover_fade): each tab's hover_level moves towards 1 (hovered) or 0.
+    //! hover_ just changed from `old`: repaints both and starts the fade if it is on.
+    void hover_changed(std::size_t old) noexcept;
+    void stop_hover_fade() noexcept;
+    void on_hover_timer() noexcept;
 
     HWND wnd_{nullptr};
     StripListener* listener_{nullptr};
@@ -361,6 +382,8 @@ private:
     std::size_t selected_count_{0};
     //! Where a Shift+click range starts: the tab last clicked (no_index = the active tab).
     std::size_t anchor_index_{no_index};
+    //! Where the focus was before a Ctrl/Shift+click took it, given back when the selection ends.
+    HWND focus_return_{nullptr};
     bool tracking_{false};
     bool focused_{false};
     bool hide_focus_{true};
@@ -387,6 +410,9 @@ private:
     std::size_t drag_press_origin_{no_index};
     //! A plain press on a selected tab: the selection ends on release, unless it was dragged.
     bool clear_on_release_{false};
+
+    bool hover_fading_{false};
+    std::uint64_t hover_tick_{0};
 
     bool switching_{false};
     std::size_t switch_from_{no_index};

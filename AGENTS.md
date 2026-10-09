@@ -131,3 +131,50 @@ erase the page behind the control first (`repaint_behind`). A plain `SetWindowTe
   then the rest.
 - `save_png` in `render_test` writes 24 bpp BGR: WIC's PNG encoder turns a 32 bpp request into
   24 bpp, and the 32 bpp rows it was fed before scrambled every image in `test/out`.
+
+## Performance
+
+- A panel's window is created the first time its tab is shown (can be turned off). Inactive tabs are
+  hidden and report themselves as not visible, so well-behaved panels do no work.
+- A switch is one `DeferWindowPos` batch: show the new panel, hide the old one. Nothing else is moved
+  or repainted.
+- No timers, hooks or polling while idle. Auto-hide is event driven (`TrackMouseEvent`); a timer runs
+  only while a delay is due, an animation plays, or a tab drag is in progress (to catch Esc).
+- Only the strip is painted: double-buffered, dirty rectangles only, and no heap allocations in
+  `WM_PAINT` (checked by the render test).
+- Measured on a 150 ms switch animation: about 11 strip paints, the slowest about 1 ms, no
+  allocations. The first container's own setup takes about 18 ms.
+- The DLL does not import Columns UI, so it loads where only the Default UI is installed.
+
+## Tests
+
+`test\build_tests.bat` builds and runs these tests:
+
+- `codec_test`: settings and tabs survive a round trip, fields from newer versions are kept, and
+  damaged data falls back to defaults.
+- `layout_test`: tab positions for each width mode and alignment, and overflow.
+- `render_test`: renders the strip offline, times it, counts allocations in the paint path and
+  writes PNGs to `test\out\`. Also checks multi-select and block drag (reorder report, Esc cancel,
+  clearing the selection).
+- `showwindow_test`, `zorder_test`: the window messages the tab switching relies on.
+
+The cover colour and contrast code has its own tests in `fb2k-common\test\`.
+
+## Source map
+
+| File | Job |
+| --- | --- |
+| `src/component.cpp` | Component identity |
+| `src/hosts/tabs_core.cpp` | The container logic shared by both UIs: tabs, switching, menus, auto-hide |
+| `src/hosts/container.cpp` | The Columns UI splitter |
+| `src/hosts/dui_container.cpp` | The Default UI container element |
+| `src/hosts/configure_dialog.cpp` | The Configure dialog |
+| `src/model/settings.cpp`, `codec.cpp` | Settings and their storage |
+| `src/model/cover_accent.h`, `colour.h` | Accent colour from the cover (forwarders to `fb2k-common`) |
+| `src/strip/strip_window.cpp` | The strip: drawing, input, tooltips |
+| `src/strip/strip_layout.cpp` | Tab positions and overflow |
+| `src/strip/hot_zone.cpp` | The auto-hide hot zone |
+| `src/platform/` | Drawing, cover loading and decoding, timing and logging |
+
+Settings are stored in a versioned format that keeps fields it does not know, so adding an option
+does not break an existing layout.

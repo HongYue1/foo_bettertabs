@@ -532,6 +532,7 @@ void ConfigureDialog::settings_to_controls() {
     select(IDC_BACKGROUND, static_cast<int>(s.strip_background));
     ::SetWindowTextW(control(IDC_BACKGROUND_HEX), format_rgb(s.background_argb).c_str());
     set_slider(IDC_TINT, 2, 60, s.tint_strength);
+    check(IDC_TRANSPARENT, s.transparent_background);
 
     select(IDC_HOVER_STYLE, static_cast<int>(s.hover_style));
     select(IDC_HOVER_COLOUR, static_cast<int>(s.hover_colour));
@@ -604,6 +605,7 @@ void ConfigureDialog::settings_from_controls() {
     pick(IDC_BACKGROUND, s.strip_background);
     s.background_argb = parse_rgb(window_text(control(IDC_BACKGROUND_HEX)), s.background_argb);
     s.tint_strength = static_cast<std::uint8_t>(std::clamp(slider(IDC_TINT), 2, 60));
+    s.transparent_background = checked(IDC_TRANSPARENT);
 
     pick(IDC_HOVER_STYLE, s.hover_style);
     pick(IDC_HOVER_COLOUR, s.hover_colour);

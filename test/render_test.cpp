@@ -665,6 +665,125 @@ int hover_test(HWND parent) {
     return failures;
 }
 
+// Settings::transparent_background: the strip shows what its parent paints, as a Columns UI
+// theme with a background image does. The parent here paints green left of x = 200 and blue
+// from there (its own client coordinates) and counts how often it was asked.
+int g_pattern_erases = 0;
+constexpr std::uint32_t pattern_left = 0x00A040;
+constexpr std::uint32_t pattern_right = 0x2050C0;
+
+LRESULT CALLBACK pattern_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND || (msg == WM_PRINTCLIENT && (lp & PRF_ERASEBKGND) != 0)) {
+        if (msg == WM_ERASEBKGND) ++g_pattern_erases;
+        const HDC dc = reinterpret_cast<HDC>(wp);
+        RECT client{};
+        GetClientRect(wnd, &client);
+        const auto fill = [dc](RECT r, std::uint32_t rgb) {
+            const COLORREF previous = SetDCBrushColor(dc, RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF));
+            FillRect(dc, &r, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+            SetDCBrushColor(dc, previous);
+        };
+        fill(RECT{0, 0, 200, client.bottom}, pattern_left);
+        fill(RECT{200, 0, client.right, client.bottom}, pattern_right);
+        return 1;
+    }
+    return DefWindowProcW(wnd, msg, wp, lp);
+}
+
+int transparent_test() {
+    int failures = 0;
+    const auto check = [&failures](bool ok, const char* what) {
+        std::printf("%s  transparent: %s\n", ok ? "ok  " : "FAIL", what);
+        if (!ok) ++failures;
+    };
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = pattern_proc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"ept_pattern_parent";
+    RegisterClassW(&wc);
+    const HWND parent = CreateWindowExW(0, wc.lpszClassName, L"", WS_POPUP | WS_CLIPCHILDREN, 0, 0, 800, 200, nullptr,
+                                        nullptr, wc.hInstance, nullptr);
+    if (parent == nullptr) {
+        check(false, "parent window");
+        return failures;
+    }
+    NullListener listener;
+    StripWindow strip;
+    if (!strip.create(parent, listener)) {
+        check(false, "create");
+        DestroyWindow(parent);
+        return failures;
+    }
+    strip.set_dpi_override(96);
+    Settings s;
+    s.indicator = Indicator::pill;
+    s.transparent_background = true;
+    strip.set_settings(s);
+    StripTheme theme;
+    theme.background = colour::colorref_from_rgb(dark_bg);
+    theme.text = RGB(255, 255, 255);
+    theme.dark = true;
+    theme.accent = colour::colorref_from_rgb(colour::accent_for_background(cover_raw, dark_bg));
+    strip.set_theme(theme);
+    StripFont font;
+    font.family = L"Segoe UI";
+    font.size_dip = 12.0f;
+    strip.set_font(font);
+    const std::vector<std::wstring> names = {L"Alpha", L"Bravo", L"Charlie"};
+    strip.set_labels(names, 0);
+    const int w = 420;
+    const int h = strip.thickness();
+    SetWindowPos(strip.hwnd(), nullptr, 0, 50, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    const RECT all{0, 0, w, h};
+    struct Row {
+        int pattern{0}; // pixels of row 0 that show the parent's pattern where they should
+        int strip{0};   // pixels of row 0 that are the strip's own background
+        int marked{0};  // pixels anywhere that are neither (tabs, titles)
+    };
+    // `offset`: the strip's x in the parent, which decides the colour expected at strip x.
+    const auto shoot = [&](const RECT& dirty, int offset) {
+        Row row;
+        int bw = 0, bh = 0, stride = 0;
+        const std::uint8_t* bits = strip.render(dirty) ? strip.pixels(bw, bh, stride) : nullptr;
+        if (bits == nullptr) return row;
+        for (int y = 0; y < h && y < bh; ++y) {
+            const auto* line = reinterpret_cast<const std::uint32_t*>(bits + static_cast<std::size_t>(y) * stride);
+            for (int x = 0; x < w && x < bw; ++x) {
+                const std::uint32_t c = line[x] & 0xFFFFFFu;
+                const std::uint32_t expected = x + offset < 200 ? pattern_left : pattern_right;
+                if (y == 0) {
+                    row.pattern += c == expected ? 1 : 0;
+                    row.strip += c == dark_bg ? 1 : 0;
+                }
+                row.marked += c != pattern_left && c != pattern_right && c != dark_bg ? 1 : 0;
+            }
+        }
+        return row;
+    };
+    g_pattern_erases = 0;
+    const Row first = shoot(all, 0);
+    std::printf("      row 0: %d of %d px show the parent, %d px marked\n", first.pattern, w, first.marked);
+    check(first.pattern == w, "the parent's background shows behind the tabs");
+    check(first.marked > 0, "the tabs and titles are drawn over it");
+    check(g_pattern_erases == 1, "the parent is asked once");
+    (void)shoot(RECT{0, 0, 60, h}, 0);
+    check(g_pattern_erases == 1, "a partial repaint (hover, switch frame) reuses the backdrop");
+    SendMessageW(strip.hwnd(), WM_ERASEBKGND, 0, 0);
+    (void)shoot(all, 0);
+    check(g_pattern_erases == 2, "an erase from the host fetches it again");
+    SetWindowPos(strip.hwnd(), nullptr, 250, 50, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    const Row moved = shoot(all, 250);
+    check(moved.pattern == w && g_pattern_erases == 3, "after a move the backdrop follows the new place");
+    s.transparent_background = false;
+    strip.set_settings(s);
+    const Row solid = shoot(all, 250);
+    check(solid.strip == w && solid.pattern == 0, "off: the strip's own background");
+    check(g_pattern_erases == 3, "off: the parent is not asked");
+    strip.destroy();
+    DestroyWindow(parent);
+    return failures;
+}
+
 } // namespace
 
 int main() {
@@ -689,6 +808,7 @@ int main() {
     failures += block_drag_test(parent);
     failures += selection_test(parent);
     failures += hover_test(parent);
+    failures += transparent_test();
     DestroyWindow(parent);
     gfx::shutdown();
     CoUninitialize();

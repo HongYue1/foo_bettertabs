@@ -77,6 +77,7 @@ Settings odd_settings() {
     s.hover_text = HoverText::colour;
     s.hover_fade = true;
     s.hover_fade_ms = 240;
+    s.transparent_background = true;
     return s;
 }
 

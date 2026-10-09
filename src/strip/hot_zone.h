@@ -34,6 +34,8 @@ public:
     [[nodiscard]] bool layered() const noexcept { return layered_; }
     //! The colour painted when not layered.
     void set_colour(COLORREF colour) noexcept;
+    //! When not layered: paint what the parent paints behind it (over the colour) instead.
+    void set_transparent(bool transparent) noexcept;
     //! Call when hiding it: a window hidden under the pointer gets no WM_MOUSELEAVE.
     void forget_pointer() noexcept { tracking_ = false; }
 
@@ -46,6 +48,7 @@ private:
     bool layered_{false};
     bool tracking_{false};
     COLORREF colour_{RGB(0, 0, 0)};
+    bool transparent_{false};
 };
 
 } // namespace bettertabs

@@ -174,6 +174,7 @@ constexpr float hover_line_text_alpha = 0.50f;
 StripWindow::~StripWindow() {
     destroy();
     release_buffer();
+    release_backdrop();
 }
 
 bool StripWindow::create(HWND parent, StripListener& listener) noexcept {
@@ -256,6 +257,10 @@ void StripWindow::set_settings(const Settings& settings) noexcept {
     if (settings == settings_) return;
     stop_switch();
     if (!settings.hover_fade) stop_hover_fade();
+    if (settings.transparent_background != settings_.transparent_background) {
+        backdrop_stale_ = true;
+        if (!settings.transparent_background) release_backdrop();
+    }
     settings_ = settings;
     update_thickness();
     relayout();
@@ -282,6 +287,9 @@ void StripWindow::set_theme(const StripTheme& theme, bool fade) noexcept {
 }
 
 void StripWindow::show_theme(const StripTheme& theme) noexcept {
+    // The backdrop starts from the background colour (what shows where the parent paints
+    // nothing). Not refetched for every frame of a fade: the parent is asked again at its end.
+    if (!fading_ && theme.background != theme_.background) backdrop_stale_ = true;
     theme_ = theme;
     // Exactly the host's background (no dark-mode lift): the strip matches the UI around it.
     surface_ = theme.background;
@@ -1010,6 +1018,55 @@ void StripWindow::release_buffer() noexcept {
     buffer_height_ = 0;
 }
 
+bool StripWindow::transparent() const noexcept {
+    return settings_.transparent_background && !layered_ && wnd_ != nullptr;
+}
+
+bool StripWindow::ensure_backdrop() noexcept {
+    if (backdrop_dib_ != nullptr && backdrop_width_ >= buffer_width_ && backdrop_height_ >= buffer_height_) return true;
+    release_backdrop();
+    if (buffer_width_ <= 0 || buffer_height_ <= 0) return false;
+    // Device-compatible, not a DIB: only GDI touches it (the parent paints in, BitBlt copies out).
+    const HDC screen = GetDC(nullptr);
+    if (screen == nullptr) return false;
+    backdrop_dc_ = CreateCompatibleDC(screen);
+    backdrop_dib_ = backdrop_dc_ != nullptr ? CreateCompatibleBitmap(screen, buffer_width_, buffer_height_) : nullptr;
+    ReleaseDC(nullptr, screen);
+    if (backdrop_dib_ == nullptr) {
+        release_backdrop();
+        return false;
+    }
+    backdrop_old_ = SelectObject(backdrop_dc_, backdrop_dib_);
+    backdrop_width_ = buffer_width_;
+    backdrop_height_ = buffer_height_;
+    backdrop_stale_ = true;
+    return true;
+}
+
+void StripWindow::release_backdrop() noexcept {
+    if (backdrop_dc_ != nullptr && backdrop_old_ != nullptr) SelectObject(backdrop_dc_, backdrop_old_);
+    if (backdrop_dib_ != nullptr) DeleteObject(backdrop_dib_);
+    if (backdrop_dc_ != nullptr) DeleteDC(backdrop_dc_);
+    backdrop_dc_ = nullptr;
+    backdrop_dib_ = nullptr;
+    backdrop_old_ = nullptr;
+    backdrop_width_ = 0;
+    backdrop_height_ = 0;
+    backdrop_stale_ = true;
+}
+
+void StripWindow::refresh_backdrop() noexcept {
+    if (!ensure_backdrop()) return;
+    const RECT client{0, 0, width_, height_};
+    // The background colour first: what shows where no window up the chain paints anything.
+    const COLORREF previous = SetDCBrushColor(backdrop_dc_, surface_);
+    FillRect(backdrop_dc_, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    SetDCBrushColor(backdrop_dc_, previous);
+    // The parent gets WM_ERASEBKGND and WM_PRINTCLIENT with the DC moved to its client area.
+    DrawThemeParentBackground(wnd_, backdrop_dc_, &client);
+    backdrop_stale_ = false;
+}
+
 bool StripWindow::ensure_target() noexcept {
     if (target_) return true;
     ID2D1Factory* factory = gfx::d2d();
@@ -1053,6 +1110,21 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
                (std::min)(dirty_in.bottom, LONG{height_})};
     if (dirty.right <= dirty.left || dirty.bottom <= dirty.top) return true;
 
+    // Transparent: the parent's background goes into the back buffer first, and Direct2D draws
+    // over it (a DC render target starts from what the DC holds) instead of clearing.
+    bool backdrop = false;
+    if (transparent()) {
+        if (backdrop_stale_ || backdrop_dib_ == nullptr || backdrop_width_ < buffer_width_ ||
+            backdrop_height_ < buffer_height_) {
+            refresh_backdrop();
+        }
+        if (backdrop_dib_ != nullptr && !backdrop_stale_) {
+            backdrop = BitBlt(mem_dc_, dirty.left, dirty.top, dirty.right - dirty.left, dirty.bottom - dirty.top,
+                              backdrop_dc_, dirty.left, dirty.top, SRCCOPY) != FALSE;
+            GdiFlush();
+        }
+    }
+
     if (const HRESULT bind = target_->BindDC(mem_dc_, &dirty); FAILED(bind)) {
         std::snprintf(paint_error_, sizeof(paint_error_), "BindDC failed (0x%08lx)", static_cast<unsigned long>(bind));
         return false;
@@ -1063,7 +1135,7 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
     target_->BeginDraw();
     target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
     target_->SetTextAntialiasMode(text_antialias());
-    target_->Clear(d2d_colour(surface_));
+    if (!backdrop) target_->Clear(d2d_colour(surface_));
     if (switching_) draw_switch_indicator();
 
     for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
@@ -1351,7 +1423,15 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
         create_qpc_ = now.QuadPart;
         return 0;
     }
-    case WM_ERASEBKGND: return 1;
+    case WM_ERASEBKGND:
+        // Only others ask for an erase (the strip invalidates without one): a host repainting
+        // its background (RedrawWindow with RDW_ERASE). A transparent strip fetches it again.
+        backdrop_stale_ = true;
+        return 1;
+    case WM_MOVE:
+        // Over another part of the parent: another part of its background.
+        backdrop_stale_ = true;
+        break;
     case WM_TIMER:
         if (wp == switch_timer) {
             on_switch_timer();
@@ -1562,6 +1642,7 @@ void StripWindow::on_size(int width, int height) noexcept {
     const bool changed = width != width_ || height != height_;
     width_ = width;
     height_ = height;
+    if (changed) backdrop_stale_ = true;
     check_dpi();
     if (!sync_size() && !changed) return;
     (void)ensure_buffer(width_, height_); // here, so WM_PAINT never allocates
@@ -1575,6 +1656,7 @@ bool StripWindow::sync_size() noexcept {
     if (rc.right == width_ && rc.bottom == height_) return false;
     width_ = rc.right;
     height_ = rc.bottom;
+    backdrop_stale_ = true;
     return true;
 }
 
@@ -1672,6 +1754,7 @@ bool StripWindow::set_layered(bool layered) noexcept {
         RedrawWindow(wnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
     }
     layered_ = layered;
+    backdrop_stale_ = true;
     return true;
 }
 

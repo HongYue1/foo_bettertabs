@@ -1,5 +1,9 @@
 #include "hot_zone.h"
 
+#include <uxtheme.h>
+
+#pragma comment(lib, "uxtheme.lib")
+
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace bettertabs {
@@ -60,6 +64,12 @@ void HotZone::set_colour(COLORREF colour) noexcept {
     if (wnd_ != nullptr && !layered_) InvalidateRect(wnd_, nullptr, TRUE);
 }
 
+void HotZone::set_transparent(bool transparent) noexcept {
+    if (transparent == transparent_) return;
+    transparent_ = transparent;
+    if (wnd_ != nullptr && !layered_) InvalidateRect(wnd_, nullptr, TRUE);
+}
+
 LRESULT CALLBACK HotZone::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) noexcept {
     if (msg == WM_NCCREATE) {
         auto* self = static_cast<HotZone*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
@@ -102,6 +112,7 @@ LRESULT HotZone::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
             const COLORREF previous = SetDCBrushColor(dc, colour_);
             FillRect(dc, &ps.rcPaint, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
             SetDCBrushColor(dc, previous);
+            if (transparent_) DrawThemeParentBackground(wnd_, dc, &ps.rcPaint);
         }
         EndPaint(wnd_, &ps);
         return 0;

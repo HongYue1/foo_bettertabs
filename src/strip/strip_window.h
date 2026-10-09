@@ -281,6 +281,16 @@ private:
     bool ensure_target() noexcept;
     void release_buffer() noexcept;
 
+    // Transparent background (Settings::transparent_background): what the parent paints behind
+    // the strip is kept in its own buffer and copied under every paint, so a hover or a switch
+    // frame does not make the host paint its background image again.
+    //! On, and the strip is an ordinary child (a layered auto-hide strip lies over the panel).
+    [[nodiscard]] bool transparent() const noexcept;
+    bool ensure_backdrop() noexcept;
+    void release_backdrop() noexcept;
+    //! Asks the parent for its background over the whole client area (DrawThemeParentBackground).
+    void refresh_backdrop() noexcept;
+
     [[nodiscard]] bool horizontal() const noexcept;
     //! A side strip with text turned 90 degrees.
     [[nodiscard]] bool rotated() const noexcept;
@@ -432,6 +442,15 @@ private:
     void* bits_{nullptr};
     int buffer_width_{0};
     int buffer_height_{0};
+    //! The parent's background behind the strip (transparent()), same size as the back buffer.
+    HDC backdrop_dc_{nullptr};
+    HBITMAP backdrop_dib_{nullptr};
+    HGDIOBJ backdrop_old_{nullptr};
+    int backdrop_width_{0};
+    int backdrop_height_{0};
+    //! The backdrop must be fetched again before the next paint: the strip moved or was resized,
+    //! or someone erased it (a host repainting its background invalidates with RDW_ERASE).
+    bool backdrop_stale_{true};
     com_ptr<ID2D1DCRenderTarget> target_;
     com_ptr<ID2D1SolidColorBrush> brush_;
     bool cleartype_{false};

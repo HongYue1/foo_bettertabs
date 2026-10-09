@@ -207,6 +207,8 @@ protected:
     void on_create(HWND wnd) noexcept;
     void on_destroy() noexcept;
     void fill_background(HDC dc) const noexcept;
+    //! fill_background, then (Settings::transparent_background) what our parent paints behind us.
+    void paint_background(HDC dc) const noexcept;
 
     // Menus and dialogs ----------------------------------------------------------------------
 

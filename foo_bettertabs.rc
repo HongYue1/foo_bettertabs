@@ -160,6 +160,8 @@ BEGIN
     LTEXT           "Tint strength:",IDC_STATIC,12,132,84,8
     CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,129,162,14
     LTEXT           "",IDC_TINT_VALUE,265,132,28,8
+    CONTROL         "Transparent background",IDC_TRANSPARENT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,148,281,10
+    LTEXT           "Shows what the layout paints behind the strip, such as a Columns UI theme's background image; tabs keep their fills. In a plain layout it looks the same. Not while auto-hide shows the strip over the panel.",IDC_STATIC,12,162,281,24
 END
 
 IDD_PAGE_FONTS DIALOGEX 0, 0, 300, 218

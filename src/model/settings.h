@@ -86,6 +86,10 @@ struct Settings {
     std::uint32_t background_argb{0xFF202020u};
     //! How much accent goes into an accent-tinted strip, in percent.
     std::uint8_t tint_strength{12};
+    //! The strip shows what its host paints behind it (a Columns UI theme's background image)
+    //! instead of its own background; tabs keep their fills. Not while auto-hide draws the strip
+    //! over the panel: there is no layout background there, only the panel.
+    bool transparent_background{false};
     std::uint16_t corner_radius{4};
     bool chip{false};
     //! Tab switches animate: the indicator (underline, pill or chip fill) slides.

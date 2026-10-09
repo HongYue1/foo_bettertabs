@@ -7,8 +7,10 @@
 #include "tabs_core.h"
 
 #include <commdlg.h>
+#include <uxtheme.h>
 
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "uxtheme.lib")
 
 #include <algorithm>
 #include <array>
@@ -926,17 +928,19 @@ bool TabsCore::core_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& r
         // background by forwarding these to us with their own DC and origin, so both must really
         // paint: an empty Row/Column splitter would otherwise keep whatever was on screen before.
         // Our own erase only reaches the area no child covers (WS_CLIPCHILDREN).
-        case WM_ERASEBKGND: fill_background(reinterpret_cast<HDC>(wp));
+        // DrawThemeParentBackground (the transparent strip) sends both, WM_PRINTCLIENT with
+        // PRF_CLIENT only: answering just the erase asks our parent once.
+        case WM_ERASEBKGND: paint_background(reinterpret_cast<HDC>(wp));
             result = 1;
             return true;
         case WM_PRINTCLIENT:
-            if ((lp & PRF_ERASEBKGND) != 0) fill_background(reinterpret_cast<HDC>(wp));
+            if ((lp & PRF_ERASEBKGND) != 0) paint_background(reinterpret_cast<HDC>(wp));
             return true;
         case WM_PAINT: {
             // Only reached where no child covers the client area (WS_CLIPCHILDREN), e.g. with no tabs.
             PAINTSTRUCT ps{};
             const HDC dc = BeginPaint(wnd, &ps);
-            if (dc != nullptr) fill_background(dc);
+            if (dc != nullptr) paint_background(dc);
             EndPaint(wnd, &ps);
             return true;
         }
@@ -1088,6 +1092,16 @@ void TabsCore::fill_background(HDC dc) const noexcept {
     const COLORREF previous = SetDCBrushColor(dc, fill);
     FillRect(dc, &clip, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     SetDCBrushColor(dc, previous);
+}
+
+void TabsCore::paint_background(HDC dc) const noexcept {
+    fill_background(dc);
+    // Transparent: the request goes on to our parent, with the DC moved to its client area, so
+    // the strip (and transparent children) show the layout's background (a Columns UI theme's
+    // image). The fill above stays where the parent paints nothing.
+    if (settings_.transparent_background && dc != nullptr && core_wnd() != nullptr) {
+        DrawThemeParentBackground(core_wnd(), dc, nullptr);
+    }
 }
 
 void TabsCore::refresh_colours(bool fade) noexcept {
@@ -1861,6 +1875,7 @@ void TabsCore::ah_update_mode() noexcept {
     if (hot_zone_.hwnd() == nullptr) (void)hot_zone_.create(self, *this, gfx::layered_children_supported());
     ah_sync_parent_watch();
     hot_zone_.set_colour(background_);
+    hot_zone_.set_transparent(settings_.transparent_background);
     const bool want_layered = settings_.reveal_mode == RevealMode::overlay && hot_zone_.layered();
     if (!strip_.set_layered(want_layered) && want_layered) log::warn("auto-hide: the strip could not be layered; pushing the panel instead");
     if (settings_.show_hide_animation == ShowHideAnimation::none || !ah_overlay()) {

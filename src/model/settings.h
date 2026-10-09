@@ -27,9 +27,10 @@ enum class StripBackground : std::uint8_t { theme, custom, accent_tint };
 enum class MiddleClick : std::uint8_t { nothing, hide_tab, remove_tab };
 enum class RevealMode : std::uint8_t { overlay, push };
 enum class ShowHideAnimation : std::uint8_t { none, slide, fade };
-//! How a hovered tab other than the active one is marked. The active tab keeps its own look.
+//! How a hovered tab is marked (Settings::hover_style for the others, active_hover_style for the
+//! active one). plain: the active tab's faint wash, only offered for it.
 //! New values go at the end: the codec stores the number.
-enum class HoverStyle : std::uint8_t { fill, outline, outline_fill, underline, underline_fill, none };
+enum class HoverStyle : std::uint8_t { fill, outline, outline_fill, underline, underline_fill, none, plain };
 //! The colour of the hover mark. text: the strip's text colour (a neutral wash).
 enum class HoverColour : std::uint8_t { text, accent, custom };
 //! What the hovered tab's title does: brighten to the full text colour (as the active one),
@@ -114,6 +115,17 @@ struct Settings {
     //! The hover mark fades in and out over hover_fade_ms.
     bool hover_fade{false};
     std::uint16_t hover_fade_ms{120};
+
+    // Hover on the active tab (the fade above applies to it too). plain: a faint wash, as before
+    // the active tab could have its own style.
+    HoverStyle active_hover_style{HoverStyle::plain};
+    HoverColour active_hover_colour{HoverColour::text};
+    std::uint32_t active_hover_argb{0xFF3EA6FFu};
+    std::uint8_t active_hover_fill_strength{0};
+    std::uint8_t active_hover_line_width{0};
+    std::uint8_t active_hover_line_opacity{0};
+    //! The hovered active tab's title gets lighter (OKLab lightness towards white).
+    bool active_hover_lighten{false};
 
     bool wheel_cycles{true};
     MiddleClick middle_click{MiddleClick::nothing};

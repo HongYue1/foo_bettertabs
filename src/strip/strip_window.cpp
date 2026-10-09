@@ -85,6 +85,14 @@ constexpr float icon_scale = 1.25f;
     return RGB(mix(GetRValue(a), GetRValue(b)), mix(GetGValue(a), GetGValue(b)), mix(GetBValue(a), GetBValue(b)));
 }
 
+//! Settings::active_hover_lighten: `c` moved towards white in OKLab, hover_lighten_share of the
+//! way at amount 1 (stays in gamut, keeps the hue). White stays white.
+constexpr float hover_lighten_share = 0.5f;
+[[nodiscard]] COLORREF lighten(COLORREF c, float amount) noexcept {
+    const std::uint32_t rgb = colour::rgb_from_colorref(c);
+    return colour::colorref_from_rgb(colour::mix(rgb, 0xFFFFFFu, hover_lighten_share * amount));
+}
+
 [[nodiscard]] bool intersects(const RECT& a, const RECT& b) noexcept {
     return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
@@ -557,11 +565,21 @@ float StripWindow::hover_amount(std::size_t index) const noexcept {
     return x * x * (3.0f - 2.0f * x); // smoothstep
 }
 
-COLORREF StripWindow::hover_colour() const noexcept {
-    switch (settings_.hover_colour) {
+StripWindow::HoverMark StripWindow::hover_mark(bool active) const noexcept {
+    if (active) {
+        return {settings_.active_hover_style,         settings_.active_hover_colour,
+                settings_.active_hover_argb,          settings_.active_hover_fill_strength,
+                settings_.active_hover_line_width,    settings_.active_hover_line_opacity};
+    }
+    return {settings_.hover_style,         settings_.hover_colour,      settings_.hover_argb,
+            settings_.hover_fill_strength, settings_.hover_line_width, settings_.hover_line_opacity};
+}
+
+COLORREF StripWindow::hover_colour(const HoverMark& mark) const noexcept {
+    switch (mark.colour) {
     case HoverColour::accent: return theme_.accent;
     case HoverColour::custom: {
-        const std::uint32_t c = settings_.hover_argb;
+        const std::uint32_t c = mark.argb;
         return RGB((c >> 16) & 0xFFu, (c >> 8) & 0xFFu, c & 0xFFu);
     }
     case HoverColour::text: break;
@@ -569,21 +587,21 @@ COLORREF StripWindow::hover_colour() const noexcept {
     return theme_.text;
 }
 
-float StripWindow::hover_fill_alpha() const noexcept {
-    if (settings_.hover_fill_strength != 0) return static_cast<float>(settings_.hover_fill_strength) / 100.0f;
+float StripWindow::hover_fill_alpha(const HoverMark& mark) const noexcept {
+    if (mark.fill_strength != 0) return static_cast<float>(mark.fill_strength) / 100.0f;
     // Automatic: the plain wash in the text colour; a colour gets a little more to show its hue.
-    if (settings_.hover_colour == HoverColour::text) return theme_.dark ? hover_alpha_dark : hover_alpha_light;
+    if (mark.colour == HoverColour::text) return theme_.dark ? hover_alpha_dark : hover_alpha_light;
     return theme_.dark ? hover_colour_alpha_dark : hover_colour_alpha_light;
 }
 
-float StripWindow::hover_line_alpha() const noexcept {
-    if (settings_.hover_line_opacity != 0) return static_cast<float>(settings_.hover_line_opacity) / 100.0f;
+float StripWindow::hover_line_alpha(const HoverMark& mark) const noexcept {
+    if (mark.line_opacity != 0) return static_cast<float>(mark.line_opacity) / 100.0f;
     // Automatic: a text-coloured line at full strength would outshine the active tab.
-    return settings_.hover_colour == HoverColour::text ? hover_line_text_alpha : 1.0f;
+    return mark.colour == HoverColour::text ? hover_line_text_alpha : 1.0f;
 }
 
-float StripWindow::hover_line_px(bool underline) const noexcept {
-    if (settings_.hover_line_width != 0) return static_cast<float>((std::max)(1, px(settings_.hover_line_width)));
+float StripWindow::hover_line_px(const HoverMark& mark, bool underline) const noexcept {
+    if (mark.line_width != 0) return static_cast<float>((std::max)(1, px(mark.line_width)));
     if (underline) return static_cast<float>((std::max)(2, px(2)));
     return static_cast<float>((std::max)(1, MulDiv(3, static_cast<int>(dpi_), 192)));
 }
@@ -1165,10 +1183,13 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     const Item& item = items_[index];
     const RECT r = tab_rect(index);
     const bool active = index == active_;
-    // The active tab keeps its plain wash on hover; the others get the hover mark (draw below).
+    // The hover mark (drawn below): Settings::active_hover_* on the active tab, hover_* on the
+    // others. The active tab's "plain" style is the faint wash folded into its own fill here.
     const float hovered = hover_amount(index);
-    const float active_hover = active ? hovered : 0.0f;
-    const float inactive_hover = active ? 0.0f : hovered;
+    const HoverMark mark = hover_mark(active);
+    const bool plain_wash = active && mark.style == HoverStyle::plain;
+    const float active_hover = plain_wash ? hovered : 0.0f;
+    const float mark_hover = plain_wash ? 0.0f : hovered;
     // While switching, the moving indicator carries the active fill and underline
     // (draw_switch_indicator). Text and icon colours change at once, not with the slide: a fade
     // between, say, white and black text passes through an unreadable grey.
@@ -1269,23 +1290,23 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         target_->FillRoundedRectangle(D2D1::RoundedRect(underline_rect(bar), bar / 2.0f, bar / 2.0f), brush_.get());
     }
 
-    // The hover mark (Settings::hover_style), over the tab's own fill (chip, selection).
-    const HoverStyle hover_style = settings_.hover_style;
+    // The hover mark, over the tab's own fill (chip, selection, the active fill).
+    const HoverStyle hover_style = mark.style;
     const bool hover_fill = hover_style == HoverStyle::fill || hover_style == HoverStyle::outline_fill ||
                             hover_style == HoverStyle::underline_fill;
-    const COLORREF hover_tint = hover_colour();
-    if (inactive_hover > 0.0f) {
+    const COLORREF hover_tint = hover_colour(mark);
+    if (mark_hover > 0.0f) {
         if (hover_fill) {
-            brush_->SetColor(d2d_colour(hover_tint, hover_fill_alpha() * inactive_hover));
+            brush_->SetColor(d2d_colour(hover_tint, hover_fill_alpha(mark) * mark_hover));
             fill_shape(target_.get(), brush_.get(), nullptr, bg, f, edge, tab_shape(), radius, 0.0f);
         }
         if (hover_style == HoverStyle::outline || hover_style == HoverStyle::outline_fill) {
-            brush_->SetColor(d2d_colour(hover_tint, hover_line_alpha() * inactive_hover));
-            fill_shape(target_.get(), nullptr, brush_.get(), bg, f, edge, tab_shape(), radius, hover_line_px(false));
+            brush_->SetColor(d2d_colour(hover_tint, hover_line_alpha(mark) * mark_hover));
+            fill_shape(target_.get(), nullptr, brush_.get(), bg, f, edge, tab_shape(), radius, hover_line_px(mark, false));
         }
         if (hover_style == HoverStyle::underline || hover_style == HoverStyle::underline_fill) {
-            const float bar = hover_line_px(true);
-            brush_->SetColor(d2d_colour(hover_tint, hover_line_alpha() * inactive_hover));
+            const float bar = hover_line_px(mark, true);
+            brush_->SetColor(d2d_colour(hover_tint, hover_line_alpha(mark) * mark_hover));
             target_->FillRoundedRectangle(D2D1::RoundedRect(underline_rect(bar), bar / 2.0f, bar / 2.0f),
                                           brush_.get());
         }
@@ -1301,15 +1322,18 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
         const COLORREF dimmed = blend(theme_.text, surface_, inactive_text);
         COLORREF text = active ? theme_.text : dimmed;
-        if (inactive_hover > 0.0f) {
+        if (active && hovered > 0.0f && settings_.active_hover_lighten) text = lighten(text, hovered);
+        if (!active && mark_hover > 0.0f) {
             switch (settings_.hover_text) {
-            case HoverText::brighten: text = blend(theme_.text, dimmed, inactive_hover); break;
-            case HoverText::colour: text = blend(hover_tint, dimmed, inactive_hover); break;
+            case HoverText::brighten: text = blend(theme_.text, dimmed, mark_hover); break;
+            case HoverText::colour: text = blend(hover_tint, dimmed, mark_hover); break;
             case HoverText::unchanged: break;
             }
+        }
+        if (mark_hover > 0.0f) {
             // A strong hover fill: the title must still read on it, as on a strong active fill.
             // Judged against the full fill, also while it fades in.
-            const float under_alpha = hover_fill ? hover_fill_alpha() : 0.0f;
+            const float under_alpha = hover_fill ? hover_fill_alpha(mark) : 0.0f;
             if (under_alpha >= strong_fill) {
                 const std::uint32_t under = colour::rgb_from_colorref(blend(hover_tint, surface_, under_alpha));
                 if (std::fabs(colour::apca_contrast(colour::rgb_from_colorref(text), under)) < colour::text_min_lc) {

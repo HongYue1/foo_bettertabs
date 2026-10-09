@@ -29,6 +29,10 @@ void clamp(Settings& s) noexcept {
     s.hover_line_width = (std::min)(s.hover_line_width, std::uint8_t{8});
     if (s.hover_line_opacity != 0) s.hover_line_opacity = std::clamp<std::uint8_t>(s.hover_line_opacity, 10, 100);
     limit(s.hover_fade_ms, 50, 1000);
+    if (s.hover_style == HoverStyle::plain) s.hover_style = HoverStyle::fill;
+    if (s.active_hover_fill_strength != 0) s.active_hover_fill_strength = std::clamp<std::uint8_t>(s.active_hover_fill_strength, 2, 80);
+    s.active_hover_line_width = (std::min)(s.active_hover_line_width, std::uint8_t{8});
+    if (s.active_hover_line_opacity != 0) s.active_hover_line_opacity = std::clamp<std::uint8_t>(s.active_hover_line_opacity, 10, 100);
     if (s.font.tenths_pt != 0) limit(s.font.tenths_pt, 40, 720);
     limit(s.font.weight, 0, 1000);
 }
@@ -237,6 +241,13 @@ enum SettingId : std::uint16_t {
     s_hover_fade = 55,
     s_hover_fade_ms = 56,
     s_transparent_background = 57,
+    s_active_hover_style = 58,
+    s_active_hover_colour = 59,
+    s_active_hover_argb = 60,
+    s_active_hover_fill_strength = 61,
+    s_active_hover_line_width = 62,
+    s_active_hover_line_opacity = 63,
+    s_active_hover_lighten = 64,
 };
 
 void write_settings(Writer& w, const Settings& s) {
@@ -297,6 +308,13 @@ void write_settings(Writer& w, const Settings& s) {
     field_u8(w, s_hover_fade, s.hover_fade ? 1 : 0);
     field_u16(w, s_hover_fade_ms, s.hover_fade_ms);
     field_u8(w, s_transparent_background, s.transparent_background ? 1 : 0);
+    field_u8(w, s_active_hover_style, static_cast<std::uint8_t>(s.active_hover_style));
+    field_u8(w, s_active_hover_colour, static_cast<std::uint8_t>(s.active_hover_colour));
+    field_u32(w, s_active_hover_argb, s.active_hover_argb);
+    field_u8(w, s_active_hover_fill_strength, s.active_hover_fill_strength);
+    field_u8(w, s_active_hover_line_width, s.active_hover_line_width);
+    field_u8(w, s_active_hover_line_opacity, s.active_hover_line_opacity);
+    field_u8(w, s_active_hover_lighten, s.active_hover_lighten ? 1 : 0);
 }
 
 //! Returns false for an id this build does not know.
@@ -361,6 +379,13 @@ bool read_setting(Settings& s, std::uint16_t id, std::span<const std::uint8_t> v
     case s_hover_fade: read_bool(v, s.hover_fade); return true;
     case s_hover_fade_ms: read_u16(v, s.hover_fade_ms); return true;
     case s_transparent_background: read_bool(v, s.transparent_background); return true;
+    case s_active_hover_style: read_enum(v, s.active_hover_style, HoverStyle::plain); return true;
+    case s_active_hover_colour: read_enum(v, s.active_hover_colour, HoverColour::custom); return true;
+    case s_active_hover_argb: read_u32(v, s.active_hover_argb); return true;
+    case s_active_hover_fill_strength: read_u8(v, s.active_hover_fill_strength); return true;
+    case s_active_hover_line_width: read_u8(v, s.active_hover_line_width); return true;
+    case s_active_hover_line_opacity: read_u8(v, s.active_hover_line_opacity); return true;
+    case s_active_hover_lighten: read_bool(v, s.active_hover_lighten); return true;
     default: return false;
     }
 }

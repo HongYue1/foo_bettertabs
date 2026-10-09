@@ -318,11 +318,21 @@ private:
     }
     //! 0..1: how strongly tab `index` shows as hovered (eased while the hover fades).
     [[nodiscard]] float hover_amount(std::size_t index) const noexcept;
-    [[nodiscard]] COLORREF hover_colour() const noexcept;
-    [[nodiscard]] float hover_fill_alpha() const noexcept;
-    [[nodiscard]] float hover_line_alpha() const noexcept;
+    //! The hover mark's settings: Settings::active_hover_* for the active tab, hover_* else.
+    struct HoverMark {
+        HoverStyle style{HoverStyle::fill};
+        HoverColour colour{HoverColour::text};
+        std::uint32_t argb{0};
+        std::uint8_t fill_strength{0};
+        std::uint8_t line_width{0};
+        std::uint8_t line_opacity{0};
+    };
+    [[nodiscard]] HoverMark hover_mark(bool active) const noexcept;
+    [[nodiscard]] COLORREF hover_colour(const HoverMark& mark) const noexcept;
+    [[nodiscard]] float hover_fill_alpha(const HoverMark& mark) const noexcept;
+    [[nodiscard]] float hover_line_alpha(const HoverMark& mark) const noexcept;
     //! Outline (or underline) width of the hover mark, in whole pixels.
-    [[nodiscard]] float hover_line_px(bool underline) const noexcept;
+    [[nodiscard]] float hover_line_px(const HoverMark& mark, bool underline) const noexcept;
     void draw_chevron() noexcept;
     //! Opacity of the active tab's accent fill (pill or chip).
     [[nodiscard]] float active_fill_alpha() const noexcept;

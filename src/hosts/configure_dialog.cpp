@@ -261,6 +261,33 @@ constexpr Swatch swatches[] = {
     {IDC_BACKGROUND_SWATCH, IDC_BACKGROUND_HEX, &Settings::background_argb},
     {IDC_HOVER_SWATCH, IDC_HOVER_HEX, &Settings::hover_argb},
 };
+//! The Hover page edits one of two sets: the other tabs' (Settings::hover_*) or the active tab's.
+struct HoverFields {
+    HoverStyle Settings::*style;
+    HoverColour Settings::*colour;
+    std::uint32_t Settings::*argb;
+    std::uint8_t Settings::*fill_strength;
+    std::uint8_t Settings::*line_width;
+    std::uint8_t Settings::*line_opacity;
+};
+constexpr HoverFields hover_others{&Settings::hover_style,         &Settings::hover_colour,
+                                   &Settings::hover_argb,          &Settings::hover_fill_strength,
+                                   &Settings::hover_line_width,    &Settings::hover_line_opacity};
+constexpr HoverFields hover_active{&Settings::active_hover_style,         &Settings::active_hover_colour,
+                                   &Settings::active_hover_argb,          &Settings::active_hover_fill_strength,
+                                   &Settings::active_hover_line_width,    &Settings::active_hover_line_opacity};
+//! The style list: the HoverStyle values in order; the active tab's starts with its plain wash.
+[[nodiscard]] int hover_style_index(HoverStyle style, bool active) noexcept {
+    if (!active) return style == HoverStyle::plain ? 0 : static_cast<int>(style);
+    return style == HoverStyle::plain ? 0 : static_cast<int>(style) + 1;
+}
+[[nodiscard]] HoverStyle hover_style_at(LRESULT index, bool active) noexcept {
+    if (active) {
+        if (index == 0) return HoverStyle::plain;
+        --index;
+    }
+    return index >= 0 && index <= static_cast<LRESULT>(HoverStyle::none) ? static_cast<HoverStyle>(index) : HoverStyle::fill;
+}
 //! `button` must be one of the swatches; anything else gets the first.
 [[nodiscard]] const Swatch& swatch_for(int button) {
     for (const Swatch& swatch : swatches) {
@@ -370,6 +397,14 @@ private:
     ConfigureTarget& target_;
     const bool live_;
     bool loading_{false};
+    //! The Hover page shows the active tab's settings (else the other tabs').
+    bool hover_active_{false};
+    [[nodiscard]] const HoverFields& hover_fields() const noexcept { return hover_active_ ? hover_active : hover_others; }
+    [[nodiscard]] std::uint32_t Settings::*swatch_field(const Swatch& swatch) const noexcept {
+        return swatch.button == IDC_HOVER_SWATCH ? hover_fields().argb : swatch.field;
+    }
+    void fill_hover_styles();
+    void hover_to_controls();
     int selected_{-1};
     HWND pages_[page_count]{};
     HFONT icon_font_{nullptr};
@@ -410,9 +445,10 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_CHEVRON), {L"At the end of the strip", L"At the start of the strip"});
     // Order matters: Indicator, one for one.
     fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only", L"Tab", L"Outlined tab"});
-    // Order matters: HoverStyle, HoverColour and HoverText, one for one.
-    fill_combo(control(IDC_HOVER_STYLE), {L"Fill", L"Outline", L"Outline and fill", L"Underline",
-                                          L"Underline and fill", L"No mark"});
+    fill_combo(control(IDC_HOVER_TARGET), {L"Other tabs", L"The active tab"});
+    ::SendMessageW(control(IDC_HOVER_TARGET), CB_SETCURSEL, hover_active_ ? 1 : 0, 0);
+    fill_hover_styles();
+    // Order matters: HoverColour and HoverText, one for one.
     fill_combo(control(IDC_HOVER_COLOUR), {L"Text colour", L"Accent colour", L"Custom colour"});
     fill_combo(control(IDC_HOVER_TEXT), {L"Brightens", L"Stays as it is", L"Takes the hover colour"});
     // Order matters: AccentSource and StripBackground, one for one.
@@ -534,15 +570,9 @@ void ConfigureDialog::settings_to_controls() {
     set_slider(IDC_TINT, 2, 60, s.tint_strength);
     check(IDC_TRANSPARENT, s.transparent_background);
 
-    select(IDC_HOVER_STYLE, static_cast<int>(s.hover_style));
-    select(IDC_HOVER_COLOUR, static_cast<int>(s.hover_colour));
-    ::SetWindowTextW(control(IDC_HOVER_HEX), format_rgb(s.hover_argb).c_str());
+    hover_to_controls();
     select(IDC_HOVER_TEXT, static_cast<int>(s.hover_text));
-    check(IDC_HOVER_FILL_AUTO, s.hover_fill_strength == 0);
-    set_slider(IDC_HOVER_FILL, 2, 80, s.hover_fill_strength == 0 ? 10 : s.hover_fill_strength);
-    set_number(IDC_HOVER_LINE_WIDTH, s.hover_line_width);
-    check(IDC_HOVER_LINE_AUTO, s.hover_line_opacity == 0);
-    set_slider(IDC_HOVER_LINE, 10, 100, s.hover_line_opacity == 0 ? 50 : s.hover_line_opacity);
+    check(IDC_HOVER_LIGHTEN, s.active_hover_lighten);
     check(IDC_HOVER_FADE, s.hover_fade);
     set_number(IDC_HOVER_FADE_MS, s.hover_fade_ms);
 
@@ -569,6 +599,36 @@ void ConfigureDialog::settings_to_controls() {
     update_enabled();
     ::InvalidateRect(control(IDC_ACCENT_SWATCH), nullptr, FALSE);
     ::InvalidateRect(control(IDC_BACKGROUND_SWATCH), nullptr, FALSE);
+    ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
+}
+
+void ConfigureDialog::fill_hover_styles() {
+    std::vector<const wchar_t*> names;
+    if (hover_active_) names.push_back(L"Plain wash");
+    // Order matters: HoverStyle, one for one (see hover_style_index).
+    for (const wchar_t* name : {L"Fill", L"Outline", L"Outline and fill", L"Underline", L"Underline and fill", L"No mark"}) {
+        names.push_back(name);
+    }
+    const HWND combo = control(IDC_HOVER_STYLE);
+    ::SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    for (const wchar_t* name : names) ::SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
+}
+
+//! The controls the two hover sets share, from the set the page shows.
+void ConfigureDialog::hover_to_controls() {
+    const Settings& s = state_.settings;
+    const HoverFields& h = hover_fields();
+    select(IDC_HOVER_STYLE, hover_style_index(s.*h.style, hover_active_));
+    select(IDC_HOVER_COLOUR, static_cast<int>(s.*h.colour));
+    ::SetWindowTextW(control(IDC_HOVER_HEX), format_rgb(s.*h.argb).c_str());
+    check(IDC_HOVER_FILL_AUTO, s.*h.fill_strength == 0);
+    set_slider(IDC_HOVER_FILL, 2, 80, s.*h.fill_strength == 0 ? 10 : s.*h.fill_strength);
+    set_number(IDC_HOVER_LINE_WIDTH, s.*h.line_width);
+    check(IDC_HOVER_LINE_AUTO, s.*h.line_opacity == 0);
+    set_slider(IDC_HOVER_LINE, 10, 100, s.*h.line_opacity == 0 ? 50 : s.*h.line_opacity);
+    // The title row: the others' choice of colour, or the active tab's lighten box.
+    ::ShowWindow(control(IDC_HOVER_TEXT), hover_active_ ? SW_HIDE : SW_SHOWNA);
+    ::ShowWindow(control(IDC_HOVER_LIGHTEN), hover_active_ ? SW_SHOWNA : SW_HIDE);
     ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
 }
 
@@ -607,15 +667,17 @@ void ConfigureDialog::settings_from_controls() {
     s.tint_strength = static_cast<std::uint8_t>(std::clamp(slider(IDC_TINT), 2, 60));
     s.transparent_background = checked(IDC_TRANSPARENT);
 
-    pick(IDC_HOVER_STYLE, s.hover_style);
-    pick(IDC_HOVER_COLOUR, s.hover_colour);
-    s.hover_argb = parse_rgb(window_text(control(IDC_HOVER_HEX)), s.hover_argb);
-    pick(IDC_HOVER_TEXT, s.hover_text);
-    s.hover_fill_strength =
+    const HoverFields& h = hover_fields();
+    if (const LRESULT index = selection(IDC_HOVER_STYLE); index != CB_ERR) s.*h.style = hover_style_at(index, hover_active_);
+    pick(IDC_HOVER_COLOUR, s.*h.colour);
+    s.*h.argb = parse_rgb(window_text(control(IDC_HOVER_HEX)), s.*h.argb);
+    s.*h.fill_strength =
         checked(IDC_HOVER_FILL_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_HOVER_FILL), 2, 80));
-    s.hover_line_width = static_cast<std::uint8_t>((std::min)(number(IDC_HOVER_LINE_WIDTH), std::uint16_t{8}));
-    s.hover_line_opacity =
+    s.*h.line_width = static_cast<std::uint8_t>((std::min)(number(IDC_HOVER_LINE_WIDTH), std::uint16_t{8}));
+    s.*h.line_opacity =
         checked(IDC_HOVER_LINE_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_HOVER_LINE), 10, 100));
+    pick(IDC_HOVER_TEXT, s.hover_text);
+    s.active_hover_lighten = checked(IDC_HOVER_LIGHTEN);
     s.hover_fade = checked(IDC_HOVER_FADE);
     s.hover_fade_ms = number(IDC_HOVER_FADE_MS);
 
@@ -715,24 +777,30 @@ void ConfigureDialog::update_enabled() {
     enable(IDC_TINT_VALUE, tint);
 
     // Hover: each control only where the chosen style uses it.
-    const HoverStyle hs = s.hover_style;
+    const HoverFields& h = hover_fields();
+    const HoverStyle hs = s.*h.style;
     const bool hover_fill = hs == HoverStyle::fill || hs == HoverStyle::outline_fill || hs == HoverStyle::underline_fill;
     const bool hover_line = hs == HoverStyle::outline || hs == HoverStyle::outline_fill ||
                             hs == HoverStyle::underline || hs == HoverStyle::underline_fill;
-    const bool hover_tinted = hs != HoverStyle::none || s.hover_text == HoverText::colour;
+    // The plain wash is always the text colour.
+    const bool hover_tinted = (hs != HoverStyle::none && hs != HoverStyle::plain) ||
+                              (!hover_active_ && s.hover_text == HoverText::colour);
     enable(IDC_HOVER_COLOUR, hover_tinted);
-    const bool custom_hover = hover_tinted && s.hover_colour == HoverColour::custom;
+    const bool custom_hover = hover_tinted && s.*h.colour == HoverColour::custom;
     enable(IDC_HOVER_HEX, custom_hover);
     enable(IDC_HOVER_SWATCH, custom_hover);
     enable(IDC_HOVER_FILL_AUTO, hover_fill);
-    enable(IDC_HOVER_FILL, hover_fill && s.hover_fill_strength != 0);
-    enable(IDC_HOVER_FILL_VALUE, hover_fill && s.hover_fill_strength != 0);
+    enable(IDC_HOVER_FILL, hover_fill && s.*h.fill_strength != 0);
+    enable(IDC_HOVER_FILL_VALUE, hover_fill && s.*h.fill_strength != 0);
     enable(IDC_HOVER_LINE_WIDTH, hover_line);
     enable(IDC_HOVER_LINE_AUTO, hover_line);
-    enable(IDC_HOVER_LINE, hover_line && s.hover_line_opacity != 0);
-    enable(IDC_HOVER_LINE_VALUE, hover_line && s.hover_line_opacity != 0);
-    enable(IDC_HOVER_FADE, hs != HoverStyle::none || s.hover_text != HoverText::unchanged);
-    enable(IDC_HOVER_FADE_MS, s.hover_fade && (hs != HoverStyle::none || s.hover_text != HoverText::unchanged));
+    enable(IDC_HOVER_LINE, hover_line && s.*h.line_opacity != 0);
+    enable(IDC_HOVER_LINE_VALUE, hover_line && s.*h.line_opacity != 0);
+    // The fade is shared: it matters while either set shows something.
+    const bool fades = s.hover_style != HoverStyle::none || s.hover_text != HoverText::unchanged ||
+                       s.active_hover_style != HoverStyle::none || s.active_hover_lighten;
+    enable(IDC_HOVER_FADE, fades);
+    enable(IDC_HOVER_FADE_MS, s.hover_fade && fades);
 
     enable(IDC_SWITCH_MS, s.animations);
 
@@ -892,9 +960,23 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
         if (code != BN_CLICKED) return;
         const Swatch& swatch = swatch_for(id);
         const int hex = swatch.hex;
-        std::uint32_t argb = state_.settings.*swatch.field;
+        std::uint32_t argb = state_.settings.*swatch_field(swatch);
         // Fires EN_CHANGE, and with it the usual change handling.
         if (pick_colour(m_hWnd, argb)) ::SetWindowTextW(control(hex), format_rgb(argb).c_str());
+        return;
+    }
+    case IDC_HOVER_TARGET: {
+        // Another set of settings, not a change: show it without reading the controls first.
+        if (code != CBN_SELCHANGE) return;
+        const bool active = selection(IDC_HOVER_TARGET) == 1;
+        if (active == hover_active_) return;
+        hover_active_ = active;
+        loading_ = true;
+        fill_hover_styles();
+        hover_to_controls();
+        loading_ = false;
+        update_values();
+        update_enabled();
         return;
     }
     case IDC_TAB_TITLE_HELP:
@@ -980,7 +1062,7 @@ void ConfigureDialog::on_draw_item(UINT, LPDRAWITEMSTRUCT item) {
         return;
     }
     const Swatch& swatch = swatch_for(static_cast<int>(item->CtlID));
-    const std::uint32_t argb = parse_rgb(window_text(control(swatch.hex)), state_.settings.*swatch.field);
+    const std::uint32_t argb = parse_rgb(window_text(control(swatch.hex)), state_.settings.*swatch_field(swatch));
     draw_swatch(*item, colorref(argb));
 }
 

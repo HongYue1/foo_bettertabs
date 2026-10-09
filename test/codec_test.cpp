@@ -78,6 +78,13 @@ Settings odd_settings() {
     s.hover_fade = true;
     s.hover_fade_ms = 240;
     s.transparent_background = true;
+    s.active_hover_style = HoverStyle::underline_fill;
+    s.active_hover_colour = HoverColour::accent;
+    s.active_hover_argb = 0xFF102030u;
+    s.active_hover_fill_strength = 30;
+    s.active_hover_line_width = 2;
+    s.active_hover_line_opacity = 60;
+    s.active_hover_lighten = true;
     return s;
 }
 

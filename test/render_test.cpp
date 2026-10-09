@@ -505,7 +505,8 @@ int hover_test(HWND parent) {
     NullListener listener;
     // Renders the strip with `hover` hovered (no_index: none). `fade_wait_ms` > 0 pumps messages
     // that long after the hover (the fade timer) before rendering; < 0 renders straight away.
-    const auto shoot = [&](const Settings& s, std::size_t hover, int fade_wait_ms = 0) {
+    const auto shoot = [&](const Settings& s, std::size_t hover, int fade_wait_ms = 0,
+                           COLORREF text = RGB(255, 255, 255)) {
         Shot shot;
         StripWindow strip;
         if (!strip.create(parent, listener)) return shot;
@@ -513,7 +514,7 @@ int hover_test(HWND parent) {
         strip.set_settings(s);
         StripTheme theme;
         theme.background = colour::colorref_from_rgb(bg);
-        theme.text = RGB(255, 255, 255);
+        theme.text = text;
         theme.dark = true;
         theme.accent = colour::colorref_from_rgb(colour::accent_for_background(cover_raw, bg));
         strip.set_theme(theme);
@@ -637,6 +638,47 @@ int hover_test(HWND parent) {
     const Shot active_shot = shoot(outline, 0);
     const Shot active_plain = shoot(base, 0);
     check(!active_shot.px.empty() && active_shot.px == active_plain.px, "the active tab ignores the hover style");
+    // The plain wash shows where the active tab has no accent fill (underline indicator).
+    Settings underlined = base;
+    underlined.indicator = Indicator::underline;
+    check(shoot(underlined, 0).px != shoot(underlined, no_index).px, "active tab, plain wash (default): hovering shows");
+
+    // The active tab's own hover settings (Settings::active_hover_*).
+    Settings active_none = base;
+    active_none.active_hover_style = HoverStyle::none;
+    check(shoot(active_none, 0).px == none.px, "active tab, no mark: hovering changes nothing");
+    Settings active_outline = base;
+    active_outline.active_hover_style = HoverStyle::outline;
+    active_outline.active_hover_colour = HoverColour::custom;
+    active_outline.active_hover_argb = 0xFFE0A030u;
+    active_outline.active_hover_line_width = 3;
+    const Shot ao_shot = shoot(active_outline, 0);
+    keep(ao_shot);
+    int orange = 0;
+    for (int y = ao_shot.tab.top; y < ao_shot.tab.bottom; ++y)
+        for (int x = ao_shot.tab.left; x < ao_shot.tab.right; ++x) {
+            const std::uint32_t c = ao_shot.at(x, y);
+            orange += (((c >> 16) & 0xFF) > 0xC0 && ((c >> 8) & 0xFF) > 0x80 && (c & 0xFF) < 0x60) ? 1 : 0;
+        }
+    check(orange > 20, "active tab, outline: the frame in its own colour");
+    check(shoot(active_outline, 2).px == fill_shot.px, "active tab settings leave the other tabs alone");
+    // Lighten: a grey title gets lighter on hover; white stays white.
+    constexpr COLORREF grey = RGB(150, 150, 150);
+    const auto title_light = [](const Shot& shot) {
+        long long sum = 0;
+        for (int y = shot.tab.top; y < shot.tab.bottom; ++y)
+            for (int x = shot.tab.left; x < shot.tab.right; ++x) {
+                const std::uint32_t c = shot.at(x, y);
+                sum += ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+            }
+        return sum;
+    };
+    Settings lighten = active_none;
+    lighten.active_hover_lighten = true;
+    const Shot lit = shoot(lighten, 0, 0, grey);
+    const Shot unlit = shoot(active_none, 0, 0, grey);
+    check(title_light(lit) > title_light(unlit), "active tab, lighten: a grey title gets lighter");
+    check(shoot(lighten, 0).px == none.px, "active tab, lighten: white stays white");
 
     // Fade: right after the hover nothing shows yet; after the fade the full mark does.
     Settings fade = fill;

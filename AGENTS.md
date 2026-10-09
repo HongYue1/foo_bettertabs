@@ -113,9 +113,14 @@ erase the page behind the control first (`repaint_behind`). A plain `SetWindowTe
 
 ### Hover styles (Hover page)
 
-- `Settings::hover_*` style only tabs other than the active one; the active tab keeps its old
-  plain wash on hover. `StripWindow::draw_tab` draws the mark (fill, outline via `fill_shape`,
-  which also strokes pills now, or underline) over the tab's own fill (chip, selection).
+- `Settings::hover_*` style the tabs other than the active one, `active_hover_*` the active tab
+  (`StripWindow::hover_mark(active)`; same code as foo_enhancedplaylisttabs). `HoverStyle::plain`
+  (active only, the default) is the old wash folded into the tab's own fill. `draw_tab` draws the
+  mark (fill, outline via `fill_shape`, or underline) over the tab's own fill. The Hover page
+  edits one set at a time ("Settings for:"); the fade is shared.
+- Transparent background (Colours page): the strip caches the parent's background
+  (`DrawThemeParentBackground`) and refetches it on erase, move and size; `TabsCore`'s erase
+  handler forwards it to the host. Not for the layered auto-hide strip.
 - The fade keeps a `hover_level` per `Item` (so it moves with reorders) and is read only while
   `hover_fading_`; otherwise `index == hover_` decides. Anything that resets `hover_` on an item
   change must call `stop_hover_fade()`.

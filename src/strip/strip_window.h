@@ -229,6 +229,8 @@ private:
 
     static LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) noexcept;
     LRESULT on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept;
+    //! Answers foo_mcp's describe request (fbc/describe.h): tabs, rectangles, states.
+    LRESULT describe(LPARAM lp) const noexcept;
 
     void on_paint() noexcept;
     //! Takes the client size if width_/height_ disagree with it. True if they changed.

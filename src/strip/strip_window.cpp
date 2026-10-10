@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <string>
 
+#include <fbc/describe.h>
+
 #include "../model/colour.h"
 #include "../platform/graphics.h"
 
@@ -1488,7 +1490,37 @@ LRESULT CALLBACK StripWindow::window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM 
     return self->on_message(msg, wp, lp);
 }
 
+LRESULT StripWindow::describe(LPARAM lp) const noexcept {
+    try {
+        fbc::describe::Json j;
+        j.begin_object().key("kind").value("tab_strip").key("component").value("foo_bettertabs");
+        j.key("active").index(active_, no_index).key("hover").index(hover_, no_index);
+        j.key("dragging").value(dragging_);
+        const RECT chevron = chevron_rect();
+        j.key("chevron");
+        if (IsRectEmpty(&chevron)) j.null();
+        else j.rect(chevron);
+        j.key("tabs").begin_array();
+        for (std::size_t i = 0; i < items_.size(); ++i) {
+            const RECT r = tab_rect(i);
+            j.begin_object().key("index").value(i).key("label").value(items_[i].spec.label);
+            if (!items_[i].spec.tooltip.empty() && items_[i].spec.tooltip != items_[i].spec.label)
+                j.key("tooltip").value(items_[i].spec.tooltip);
+            j.key("shown").value(!IsRectEmpty(&r));
+            if (!IsRectEmpty(&r)) j.key("rect").rect(r);
+            if (items_[i].selected) j.key("selected").value(true);
+            j.end_object();
+        }
+        j.end_array().end_object();
+        return j.send(lp);
+    } catch (...) {
+        return 0;
+    }
+}
+
 LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
+    // Registered message, not a case label: checked first, one comparison when nobody asks.
+    if (fbc::describe::is_request(msg, lp)) return describe(lp);
     switch (msg) {
     case WM_CREATE: {
         LARGE_INTEGER now{};

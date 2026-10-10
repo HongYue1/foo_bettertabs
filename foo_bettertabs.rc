@@ -6,8 +6,7 @@
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 #pragma code_page(1252)
 
-// Dialog style profile (keep every page consistent with this; see
-// foobar2000-component-dev/references/preferences-pages.md):
+// Dialog style profile (keep every page consistent with this):
 //   sections : header + etched line, no group boxes, no bold
 //   fields   : labels in a left column (84 DU, field at 99), colon after
 //   rhythm   : check boxes 14 DU apart, field rows 16 DU, 12 DU before a new section header

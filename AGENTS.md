@@ -1,83 +1,56 @@
 # AGENTS.md - foo_bettertabs
 
-Notes for agents working on this component. See the workspace AGENTS.md one level up for the
-general rules (file tools, builds through `cmd //c`, v145 toolset, background jobs).
-
-## Build, test, release
+## Build, test, package
 
 - Build: `cmd //c build.bat Release x64` and `cmd //c build.bat Release Win32`. Read
   `build.log` / `build-Win32.log`. The build fails on post-Windows 7 imports on purpose.
-- Tests: `cmd //c test\build_tests.bat` (codec, strip layout, strip render, WM_SHOWWINDOW,
+- Tests: `cd test && cmd //c build_tests.bat` (codec, strip layout, strip render, WM_SHOWWINDOW,
   z-order). Results in `test/tests.out`; every EXIT code must be 0.
-- Cover colour and contrast (OKLab, APCA) are in the shared `../fb2k-common` library, with its
-  own tests (`fb2k-common/test/build_tests.bat`, including a golden test over the user's
-  covers). Change them there; EPT, Media Bar and foo_onscreendisplay use the same code.
 - Package: `cmd //c package.bat` -> `dist/foo_bettertabs.fb2k-component` (x86 at the root, x64
-  in `x64/`) and `dist/symbols/*.pdb`.
-- Release: bump `src/version.h`, package, archive the PDBs as
-  `../.archive/foo_bettertabs-<version>-symbols.zip`, commit, tag `v<version>`, push, and
-  `gh release create` with the .fb2k-component attached.
-- Test in a foo_mcp instance (`../foobar2000-component-dev/references/testing-with-foo-mcp.md`):
-  `python ../foo_mcp/tools/fb.py install dui64 x64/Release/<dll>`, then drive it. Never claim
-  something works because it compiled; tooltips still need the user.
+  in `x64/`) and `dist/symbols/*.pdb`. Version in `src/version.h`.
+- Cover colour and contrast come from `../fb2k-common` (shared with Enhanced Playlist Tabs, Media
+  Bar and foo_onscreendisplay); change them there.
+- Enhanced Playlist Tabs shares the strip, settings, Configure dialog and hosts (`TabsCore` here,
+  `SwitcherCore` there; index-based here, keyed there). Codec field ids differ; each keeps its own.
 
 ## Things to know
 
-### Showing a tab's panel: ShowWindow, never SWP_SHOWWINDOW
+### Showing a tab's panel
 
-`(Defer)SetWindowPos(SWP_SHOWWINDOW)` never sends `WM_SHOWWINDOW`, and Columns UI's Row/Column
-splitters show their own children only from `WM_SHOWWINDOW` (wp TRUE, lp 0). Shown that way, a
-splitter tab stayed empty (fixed in 0.5.1, `TabsCore::activate`). Show and hide panel windows
-with `ShowWindow`, as Columns UI's Tab stack does. `test/showwindow_test.cpp` proves the
-message behaviour. The strip and hot zone are our own windows and may keep using SWP flags.
+Show and hide panel windows with `ShowWindow`, never `SWP_SHOWWINDOW` (Columns UI splitters show
+their children only from `WM_SHOWWINDOW`; a splitter tab stayed empty before 0.5.1).
+`TabsCore::activate`; `test/showwindow_test.cpp`. The strip and hot zone may keep using SWP flags.
 
-### Size limits: largest maximum, page capped to its own
+### Size limits
 
-`TabsCore::compute_limits` reports min = the largest min of the created tabs and max = the
-**largest** max (0.5.4). Columns UI's Tab stack uses the smallest max, so one empty Playlist tabs
-(max height = its tab row, or 0) collapsed the whole container to a few pixels. A page whose max is
-smaller than the container is placed at its max size at the top left (`TabsCore::child_rect`, used
-by `activate` and layout). Uncreated tabs do not count.
+`TabsCore::compute_limits`: min = largest min, max = **largest** max of the created tabs (unlike
+Columns UI's Tab stack, 0.5.4). A page whose max is smaller than the container sits at its max size
+at the top left (`TabsCore::child_rect`). Uncreated tabs do not count.
 
 ### Strip paint failures and first-paint cost
 
-- A failed paint (lost target, no Direct2D) fills the background and invalidates for a full retry
-  at most twice, then waits for the next resize or update; the first failure is logged
-  (`on_strip_paint_failed`). Invalidating on every failure painted forever and starved the
-  thread's `WM_TIMER`s: foobar2000 stopped working (seen in Enhanced Playlist Tabs).
-- `sync_size()` re-reads `GetClientRect` in `WM_SIZE` and `WM_PAINT`: the strip once kept 0 x 0
-  while its window was 2307 x 44, so it never painted a layout for another size.
-- The first `BindDC` of the DC render target costs about 20 ms (cold Direct2D init, once per
-  process, at start-up). The switch log's worst-paint breakdown (bind/draw/EndDraw/copy and how long
-  before the switch) shows this; it is not a switch cost. Warming it on another thread was rejected.
+- A failed paint fills the background and retries at most twice, then waits for the next resize
+  or update; the first failure is logged (`on_strip_paint_failed`). Never invalidate on every
+  failure (it starves `WM_TIMER`).
+- `sync_size()` re-reads `GetClientRect` in `WM_SIZE` and `WM_PAINT` (the strip once kept 0 x 0).
+- The first `BindDC` costs about 20 ms (cold Direct2D init, once per process). The switch log
+  shows it in the worst-paint breakdown; it is not a switch cost.
 
 ### Auto-hide windows must stay the topmost children
 
-The hot zone and the overlay strip only work while they are above every panel window in our
-z-order. Two things put a panel above them without telling us: `SetParent` back into the
-container (places it on top) and a panel's own `SetWindowPos(HWND_TOP)`. Windows sends the parent
-no message and **no `EVENT_OBJECT_REORDER`** for either (`test/zorder_test.cpp`). Visualisations
-with their own fullscreen mode can do the first when leaving it, which made the strip impossible to reveal (fixed in 0.5.3). `TabsCore` watches
-`EVENT_OBJECT_PARENTCHANGE` (one out-of-context hook per process, only while a hot zone exists)
-and re-raises in `WM_SETCURSOR` as a fallback for the second. Verified not to bury the hot zone:
-D3D11 flip and blt swap chains on the panel, recreating them, toggling the main window topmost.
-Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest`), or
-`CreateWindowEx(WS_EX_LAYERED)` on a child fails and the test proves nothing.
+The hot zone and overlay strip must stay above every panel window. `SetParent` back into the
+container and a panel's own `SetWindowPos(HWND_TOP)` bury them with no message and no
+`EVENT_OBJECT_REORDER`. `TabsCore` watches `EVENT_OBJECT_PARENTCHANGE` (one out-of-context hook
+per process, only while a hot zone exists) and re-raises in `WM_SETCURSOR` as a fallback (fixed in
+0.5.3). `test/zorder_test.cpp` needs `test/compat.manifest` (layered children need Windows 8+).
 
 ### Divider colour in Columns UI
 
-- Row/Column splitters are transparent: the gaps between their panels (the dividers) show what
-  the parent paints. Columns UI paints its layout background there, so `TabsCore::fill_background`
-  paints `HostColours::layout` for a child's DC and the panel background only for our own DC.
-- Columns UI does not expose that colour to components. The values are copied from its source
-  (`dark::ColourID::LayoutBackground`): RGB(51, 51, 51) in dark mode, `COLOR_BTNFACE` in light
-  mode (`container.cpp`, `host_colours`). If a future Columns UI changes that grey, update it.
-- The divider width is Columns UI's own setting (Preferences > Display > Columns UI > Layout, Misc tab; default 2); 0
-  hides the dividers everywhere, inside Better Tabs too. Do not add a second width setting.
-- An empty Row/Column, or a transparent panel placed directly in a tab, shows the same grey, as
-  it would outside Better Tabs.
-- Columns UI only. The Default UI container is unchanged (its host leaves `layout` unset, so it
-  falls back to the panel background).
+`TabsCore::fill_background` paints `HostColours::layout` for a child's DC (the gaps between
+transparent splitter panels) and the panel background only for our own DC. The value copies
+Columns UI's layout background (RGB(51, 51, 51) dark, `COLOR_BTNFACE` light; `host_colours`);
+update it if Columns UI changes. The divider width is Columns UI's own setting: don't add a second
+one. Default UI leaves `layout` unset (falls back to the panel background).
 
 ### Selection and block drag (0.6)
 
@@ -86,7 +59,7 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
   any change of the active tab resets the anchor to it. Ctrl/Shift+click takes the focus and
   `clear_selection` gives it back; `WM_KILLFOCUS` ends the selection; the active tab in the
   selection is outlined regardless of `UISF_HIDEFOCUS`. Same design as
-  foo_enhancedplaylisttabs 1.3.1; `test/render_test.cpp` `selection_test` covers it.
+  Enhanced Playlist Tabs 1.3.1; `test/render_test.cpp` `selection_test` covers it.
   `set_labels` keeps the selection by index, so after a reorder the host must rebuild the strip in
   the new order (`TabsCore::on_strip_reorder_block` does) and the selection follows the moved tabs.
 - A drag of a selected tab moves the whole selection; each item remembers `Item::drag_origin` so Esc
@@ -97,21 +70,16 @@ Layered children need a Windows 8+ manifest in a test exe (`test/compat.manifest
 - The strip background is exactly the host background (no dark-mode lift).
 - Tab / outlined-tab indicators share `tab_shape()` with Enhanced Playlist Tabs; keep them in sync.
 
-### Title formatting without a track: never run(nullptr)
+### Title formatting without a track
 
-`titleformat_object::run` needs a real `titleformat_hook`: the core calls `p_source->process_field`
-without a null check, so `run(nullptr, ...)` crashes on the first field (read AV at 0 inside
-foobar2000.exe, call path `main_thread_callback::callback_run`). `playback_format_title` returns false
-while playback is starting, before the track is open, which is when the fallback ran (fixed in
-0.6.2). `update_label` passes `NoTrackHook` instead: with no track, fields are empty (not "?") and a
-blank result falls back to the panel's own name; a script with its own `$if()` fallback keeps it.
+Never `titleformat_object::run(nullptr, ...)` (crashes; fixed in 0.6.2). `update_label` passes
+`NoTrackHook`: with no track, fields are empty and a blank result falls back to the panel's name.
 
 ### Dialog labels in dark mode
 
-Static text is drawn on a transparent background in dark mode. Change a label's text or enabled
-state only through `set_label` / `enable` in `configure_dialog.cpp`: they skip no-op changes and
-erase the page behind the control first (`repaint_behind`). A plain `SetWindowText` or
-`EnableWindow` piles the new text on the old, which looks bold and fringed (fixed in 0.6.1).
+Change a label's text or enabled state only through `set_label` / `enable` in
+`configure_dialog.cpp` (`repaint_behind`); plain `SetWindowText` / `EnableWindow` piles text up
+in dark mode (fixed in 0.6.1).
 
 ### Hover styles (Hover page)
 
@@ -157,8 +125,7 @@ erase the page behind the control first (`repaint_behind`). A plain `SetWindowTe
   `WM_MOUSELEAVE` ends the hover.
 - Pages are `IDD_PAGE_STRIP + i`, so the ids stay consecutive: Strip, Look, Hover, Colours, Fonts,
   then the rest.
-- `save_png` in `render_test` writes 24 bpp BGR: WIC's PNG encoder turns a 32 bpp request into
-  24 bpp, and the 32 bpp rows it was fed before scrambled every image in `test/out`.
+- `save_png` in `render_test` writes 24 bpp BGR (WIC's PNG encoder turns 32 bpp into 24 bpp).
 
 ## Performance
 

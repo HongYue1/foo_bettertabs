@@ -1,5 +1,5 @@
 // The Configure dialog and the Rename dialog. Layout: foo_bettertabs.rc (style profile at the top);
-// conventions: foobar2000-component-dev/references/preferences-pages.md (one child dialog per
+// conventions: one child dialog per
 // page with its own dark-mode hooks, guarded WM_NOTIFY, padded edits, swatch + hex colours).
 
 #include <helpers/foobar2000+atl.h>

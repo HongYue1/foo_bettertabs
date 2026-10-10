@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../src/model/codec.h"
+#include "../src/model/font_size.h"
 
 using namespace bettertabs;
 
@@ -84,7 +85,14 @@ Settings odd_settings() {
     s.active_hover_fill_strength = 30;
     s.active_hover_line_width = 2;
     s.active_hover_line_opacity = 60;
-    s.active_hover_lighten = true;
+    s.active_hover_text = HoverText::custom;
+    s.active_hover_text_argb = 0xFFFFD700u;
+    s.hover_text_argb = 0xFF123456u;
+    s.custom_text = true;
+    s.text_argb = 0xFF806000u;
+    s.custom_active_text = true;
+    s.active_text_argb = 0xFFFFD700u;
+    s.transparent_opacity = 35;
     return s;
 }
 
@@ -113,6 +121,16 @@ InstanceData sample() {
 
 int main() {
     {
+        // GDI keeps whole pixels: 8 pt is 11 px at 96 DPI (8.25 pt read back), 16 px at 144.
+        check(tenths_from_pixels(11.0f, 96) == 80, "11 px at 96 DPI is 8 pt");
+        check(tenths_from_pixels(16.0f, 144) == 80, "16 px at 144 DPI is 8 pt");
+        check(tenths_from_pixels(13.0f, 120) == 80, "13 px at 120 DPI is 8 pt");
+        check(tenths_from_pixels(12.0f, 96) == 90, "12 px at 96 DPI is 9 pt");
+        check(tenths_from_pixels(14.0f, 120) == 85, "14 px at 120 DPI is 8.5 pt");
+        check(tenths_from_pixels(15.0f, 96) == 110 || tenths_from_pixels(15.0f, 96) == 115, "15 px at 96 DPI");
+        check(tenths_from_pixels(0.0f, 96) == 0, "no height");
+    }
+    {
         const InstanceData def;
         const InstanceData back = decode_instance(encode_instance(def));
         check(back.settings == Settings{}, "defaults round-trip");
@@ -122,6 +140,10 @@ int main() {
         const InstanceData d = sample();
         const InstanceData back = decode_instance(encode_instance(d));
         check(back.settings == d.settings, "every setting round-trips");
+        InstanceData dl = d;
+        dl.settings.active_hover_text = HoverText::brighten;
+        check(decode_instance(encode_instance(dl)).settings.active_hover_text == HoverText::brighten,
+              "active tab lighten (0.9 bool) round-trips");
         check(back.children.size() == 2, "child count");
         check(same_guid(back.children[0].guid, guid_a) && same_guid(back.children[1].guid, guid_b), "child GUIDs");
         check(back.children[0].config == d.children[0].config && back.children[1].config.empty(), "child configs");

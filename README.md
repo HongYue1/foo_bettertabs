@@ -15,8 +15,8 @@
   same strip, menus and settings.
 - **Strip on any side**, with rotated titles on the left and right if you like.
 - **Your look**: underline, pill, tab, outlined tab or text-only indicator, chips, corner radius,
-  tab width and alignment, spacing, hover styles (the active tab has its own), a tab font with
-  fallbacks, and transparency.
+  tab width and alignment, spacing, hover styles (the active tab has its own), text colours, a tab
+  font with fallbacks, and transparency with an adjustable background opacity.
 - **Icons on tabs** (Segoe Fluent Icons or emoji), or icon-only tabs.
 - **Accent colour** from the UI, a custom colour or the playing track's cover, and a strip
   background that can be tinted with it. Colours, fonts and dark mode follow your Columns UI or
@@ -80,8 +80,13 @@ and, on a tab, **Replace**, **Copy**, **Rename** and **Remove**. Right-click an 
 - **Auto-hide** keeps the strip while its menu is open, while you drag a tab and while it has the
   keyboard focus.
 - **Transparency** only shows something when your layout draws a background behind the strip,
-  such as a Columns UI theme. The auto-hide strip shown over the panel stays solid.
-- **Lighten the text colour** for the hovered active tab does nothing to white text.
+  such as a Columns UI theme. The auto-hide strip shown over the panel stays solid. If the
+  container changes its background (a new cover, say), it has to repaint the panels inside it;
+  the strip picks up the new background on that repaint.
+- **Text colours**: the Colours page sets the titles of the other tabs and of the active (and
+  selected) tabs; the Hover page sets a hovered tab's title, separately for the active tab.
+  Colours you pick are used as they are. "Brightens" on the active tab lightens towards white,
+  which does nothing to white text.
 - **Performance log**: **Preferences > Advanced > Display > Better Tabs: log performance to the
   console**.
 

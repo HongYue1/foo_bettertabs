@@ -85,12 +85,21 @@ constexpr float icon_scale = 1.25f;
     return RGB(mix(GetRValue(a), GetRValue(b)), mix(GetGValue(a), GetGValue(b)), mix(GetBValue(a), GetBValue(b)));
 }
 
-//! Settings::active_hover_lighten: `c` moved towards white in OKLab, hover_lighten_share of the
+//! Settings::active_hover_text == brighten: `c` moved towards white in OKLab, hover_lighten_share of the
 //! way at amount 1 (stays in gamut, keeps the hue). White stays white.
 constexpr float hover_lighten_share = 0.5f;
 [[nodiscard]] COLORREF lighten(COLORREF c, float amount) noexcept {
     const std::uint32_t rgb = colour::rgb_from_colorref(c);
     return colour::colorref_from_rgb(colour::mix(rgb, 0xFFFFFFu, hover_lighten_share * amount));
+}
+
+//! A 0xAARRGGBB setting as a COLORREF (alpha ignored).
+[[nodiscard]] COLORREF argb_colour(std::uint32_t argb) noexcept { return colour::colorref_from_rgb(argb & 0xFFFFFFu); }
+
+//! `inner` lies inside `outer` (an empty `inner` always does).
+[[nodiscard]] bool contains(const RECT& outer, const RECT& inner) noexcept {
+    if (inner.right <= inner.left || inner.bottom <= inner.top) return true;
+    return inner.left >= outer.left && inner.top >= outer.top && inner.right <= outer.right && inner.bottom <= outer.bottom;
 }
 
 [[nodiscard]] bool intersects(const RECT& a, const RECT& b) noexcept {
@@ -161,8 +170,8 @@ constexpr float hover_alpha_dark = 0.08f;
 constexpr float hover_alpha_light = 0.06f;
 constexpr float chip_alpha = 0.05f;
 constexpr float chip_active_alpha = 0.18f;
-constexpr float pill_alpha_dark = 0.30f;
-constexpr float pill_alpha_light = 0.26f;
+constexpr float pill_alpha_dark = static_cast<float>(auto_fill_dark) / 100.0f;
+constexpr float pill_alpha_light = static_cast<float>(auto_fill_light) / 100.0f;
 //! An outlined tab: a faint wash inside a solid accent outline.
 constexpr float outline_fill_alpha = 0.05f;
 //! Tabs in the multiple selection: an accent wash, below the active tab's.
@@ -261,6 +270,18 @@ void StripWindow::destroy() noexcept {
 // ---------------------------------------------------------------------------------------------
 // Inputs from the host. Everything expensive happens here, never in WM_PAINT.
 
+void StripWindow::invalidate(const RECT* r) noexcept {
+    if (wnd_ == nullptr) return;
+    if (r == nullptr) {
+        own_dirty_ = RECT{-0x3FFFFFFF, -0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF};
+    } else if (own_dirty_.right <= own_dirty_.left || own_dirty_.bottom <= own_dirty_.top) {
+        own_dirty_ = *r;
+    } else {
+        UnionRect(&own_dirty_, &own_dirty_, r);
+    }
+    InvalidateRect(wnd_, r, FALSE);
+}
+
 void StripWindow::set_settings(const Settings& settings) noexcept {
     if (settings == settings_) return;
     stop_switch();
@@ -272,7 +293,7 @@ void StripWindow::set_settings(const Settings& settings) noexcept {
     settings_ = settings;
     update_thickness();
     relayout();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::set_theme(const StripTheme& theme, bool fade) noexcept {
@@ -301,7 +322,7 @@ void StripWindow::show_theme(const StripTheme& theme) noexcept {
     theme_ = theme;
     // Exactly the host's background (no dark-mode lift): the strip matches the UI around it.
     surface_ = theme.background;
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::stop_theme_fade() noexcept {
@@ -360,7 +381,7 @@ void StripWindow::set_text_options(const StripTextOptions& options) noexcept {
         update_thickness();
         relayout();
     }
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 D2D1_TEXT_ANTIALIAS_MODE StripWindow::text_antialias() const noexcept {
@@ -394,7 +415,7 @@ void StripWindow::set_font(const StripFont& font) noexcept {
     rebuild_items();
     update_thickness();
     relayout();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::set_items(std::span<const StripItem> items, std::size_t active) noexcept {
@@ -428,7 +449,7 @@ void StripWindow::set_items(std::span<const StripItem> items, std::size_t active
     update_thickness();
     relayout();
     update_tooltip();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::set_labels(std::span<const std::wstring> labels, std::size_t active) noexcept {
@@ -452,7 +473,7 @@ void StripWindow::set_active(std::size_t active) noexcept {
     if (layout_.overflow && active != no_index && !layout_.shows(active)) {
         // The visible window of tabs has to move.
         relayout();
-        if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+        if (wnd_ != nullptr) invalidate(nullptr);
         return;
     }
     invalidate_tab(old);
@@ -478,7 +499,7 @@ void StripWindow::start_switch(std::size_t from) noexcept {
         return;
     }
     const RECT r = switch_rect();
-    InvalidateRect(wnd_, &r, FALSE);
+    invalidate(&r);
 }
 
 void StripWindow::stop_switch() noexcept {
@@ -489,7 +510,7 @@ void StripWindow::stop_switch() noexcept {
     switch_t_ = 1.0f;
     if (wnd_ == nullptr) return;
     KillTimer(wnd_, switch_timer);
-    if (IsRectEmpty(&r) == FALSE) InvalidateRect(wnd_, &r, FALSE);
+    if (IsRectEmpty(&r) == FALSE) invalidate(&r);
 }
 
 void StripWindow::on_switch_timer() noexcept {
@@ -501,14 +522,14 @@ void StripWindow::on_switch_timer() noexcept {
     if (IsRectEmpty(&r) != FALSE) {
         // A tab went out of view mid-way: just show the end state.
         stop_switch();
-        InvalidateRect(wnd_, nullptr, FALSE);
+        invalidate(nullptr);
         return;
     }
     const double length = static_cast<double>((std::max)(std::uint16_t{1}, settings_.switch_ms));
     const float p = static_cast<float>(std::clamp(perf::elapsed_ms(switch_start_, perf::now()) / length, 0.0, 1.0));
     const float rest = 1.0f - p;
     switch_t_ = 1.0f - rest * rest * rest; // ease-out cubic
-    InvalidateRect(wnd_, &r, FALSE);
+    invalidate(&r);
     if (p >= 1.0f) stop_switch();
 }
 
@@ -530,7 +551,7 @@ void StripWindow::stop_hover_fade() noexcept {
     if (!hover_fading_) return;
     hover_fading_ = false;
     if (wnd_ != nullptr) KillTimer(wnd_, hover_timer);
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::on_hover_timer() noexcept {
@@ -991,7 +1012,7 @@ bool StripWindow::chevron_hit(POINT pt) const noexcept {
 void StripWindow::invalidate_tab(std::size_t index) noexcept {
     if (wnd_ == nullptr || index == no_index) return;
     const RECT r = tab_rect(index);
-    if (r.right > r.left && r.bottom > r.top) InvalidateRect(wnd_, &r, FALSE);
+    if (r.right > r.left && r.bottom > r.top) invalidate(&r);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1153,7 +1174,15 @@ bool StripWindow::render(const RECT& dirty_in) noexcept {
     target_->BeginDraw();
     target_->SetTransform(D2D1::Matrix3x2F::Translation(-origin_x_, -origin_y_));
     target_->SetTextAntialiasMode(text_antialias());
-    if (!backdrop) target_->Clear(d2d_colour(surface_));
+    if (!backdrop) {
+        target_->Clear(d2d_colour(surface_));
+    } else if (settings_.transparent_opacity != 0) {
+        // Some of the strip's own background over the host's (Settings::transparent_opacity).
+        brush_->SetColor(d2d_colour(surface_, static_cast<float>(settings_.transparent_opacity) / 100.0f));
+        target_->FillRectangle(D2D1::RectF(static_cast<float>(dirty.left), static_cast<float>(dirty.top),
+                                           static_cast<float>(dirty.right), static_cast<float>(dirty.bottom)),
+                               brush_.get());
+    }
     if (switching_) draw_switch_indicator();
 
     for (std::size_t i = layout_.first; i < layout_.last && i < items_.size(); ++i) {
@@ -1320,17 +1349,37 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
             x = f.left + std::floor((std::max)(static_cast<float>(pad_x), (room - static_cast<float>(content)) / 2.0f));
         }
         const float y = f.top + std::floor((f.bottom - f.top - static_cast<float>(item.text_height)) / 2.0f);
-        const COLORREF dimmed = blend(theme_.text, surface_, inactive_text);
-        COLORREF text = active ? theme_.text : dimmed;
-        if (active && hovered > 0.0f && settings_.active_hover_lighten) text = lighten(text, hovered);
-        if (!active && mark_hover > 0.0f) {
-            switch (settings_.hover_text) {
-            case HoverText::brighten: text = blend(theme_.text, dimmed, mark_hover); break;
-            case HoverText::colour: text = blend(hover_tint, dimmed, mark_hover); break;
+        // Colours the user picked (Colours page, Hover page) are drawn as they are: no contrast
+        // rescue below for them.
+        const COLORREF full = settings_.custom_active_text ? argb_colour(settings_.active_text_argb) : theme_.text;
+        const COLORREF dimmed =
+            settings_.custom_text ? argb_colour(settings_.text_argb) : blend(theme_.text, surface_, inactive_text);
+        const bool full_text = active || (item.selected && settings_.custom_active_text);
+        COLORREF text = full_text ? full : dimmed;
+        bool chosen = full_text ? settings_.custom_active_text : settings_.custom_text;
+        if (active && hovered > 0.0f) {
+            switch (settings_.active_hover_text) {
+            case HoverText::brighten: text = lighten(text, hovered); break;
+            case HoverText::colour: text = blend(hover_tint, text, hovered); break;
+            case HoverText::custom:
+                text = blend(argb_colour(settings_.active_hover_text_argb), text, hovered);
+                chosen = true;
+                break;
             case HoverText::unchanged: break;
             }
         }
-        if (mark_hover > 0.0f) {
+        if (!active && mark_hover > 0.0f) {
+            switch (settings_.hover_text) {
+            case HoverText::brighten: text = blend(full, text, mark_hover); break;
+            case HoverText::colour: text = blend(hover_tint, text, mark_hover); break;
+            case HoverText::custom:
+                text = blend(argb_colour(settings_.hover_text_argb), text, mark_hover);
+                chosen = true;
+                break;
+            case HoverText::unchanged: break;
+            }
+        }
+        if (mark_hover > 0.0f && !chosen) {
             // A strong hover fill: the title must still read on it, as on a strong active fill.
             // Judged against the full fill, also while it fades in.
             const float under_alpha = hover_fill ? hover_fill_alpha(mark) : 0.0f;
@@ -1343,7 +1392,7 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         }
         const bool final_fill = active && filled_indicator;
         const float final_alpha = final_fill ? active_fill_alpha() : 0.0f;
-        if (final_fill && final_alpha >= strong_fill) {
+        if (final_fill && final_alpha >= strong_fill && !chosen) {
             // A strong accent fill: keep the theme's text if it still reads, else white or black.
             // Judged against the fill the tab ends with, also while it is still sliding in.
             const COLORREF final_colour = accent_fill_colour(theme_, final_alpha);
@@ -1577,7 +1626,7 @@ LRESULT StripWindow::on_message(UINT msg, WPARAM wp, LPARAM lp) noexcept {
     case WM_SETTINGCHANGE:
         if (const bool ct = gfx::system_uses_cleartype(); ct != cleartype_) {
             cleartype_ = ct;
-            InvalidateRect(wnd_, nullptr, FALSE);
+            invalidate(nullptr);
         }
         break;
     default: break;
@@ -1590,6 +1639,11 @@ void StripWindow::on_paint() noexcept {
     const HDC dc = BeginPaint(wnd_, &ps);
     if (dc == nullptr) return;
     const RECT& rc = ps.rcPaint;
+    // A paint we did not ask for: the host invalidated us (RedrawWindow without RDW_ERASE after
+    // repainting its background, a window uncovering us). A transparent strip fetches the
+    // backdrop again; our own invalidations (hover, fades, item changes) reuse it.
+    if (!contains(own_dirty_, rc)) backdrop_stale_ = true;
+    own_dirty_ = RECT{};
     if (sync_size()) {
         // A size we missed: never paint a layout made for another size.
         (void)ensure_buffer(width_, height_);
@@ -1615,7 +1669,7 @@ void StripWindow::on_paint() noexcept {
             SetDCBrushColor(dc, previous);
             ++paint_failures_;
             if (paint_failures_ == 1 && listener_ != nullptr) listener_->on_strip_paint_failed(paint_error_);
-            if (!target_ && paint_failures_ <= 2) InvalidateRect(wnd_, nullptr, FALSE);
+            if (!target_ && paint_failures_ <= 2) invalidate(nullptr);
         }
         if (measure) {
             const auto area = static_cast<std::uint64_t>(rc.right - rc.left) * static_cast<std::uint64_t>(rc.bottom - rc.top);
@@ -1649,7 +1703,7 @@ void StripWindow::check_dpi() noexcept {
     rebuild_items();
     update_thickness();
     relayout();
-    InvalidateRect(wnd_, nullptr, FALSE);
+    invalidate(nullptr);
     if (listener_ != nullptr) listener_->on_strip_metrics_changed();
 }
 
@@ -1671,7 +1725,7 @@ void StripWindow::on_size(int width, int height) noexcept {
     if (!sync_size() && !changed) return;
     (void)ensure_buffer(width_, height_); // here, so WM_PAINT never allocates
     relayout();
-    InvalidateRect(wnd_, nullptr, FALSE);
+    invalidate(nullptr);
 }
 
 bool StripWindow::sync_size() noexcept {
@@ -1736,7 +1790,7 @@ void StripWindow::on_mouse_move(POINT pt) noexcept {
     if (chevron != chevron_hover_) {
         chevron_hover_ = chevron;
         const RECT r = chevron_rect();
-        InvalidateRect(wnd_, &r, FALSE);
+        invalidate(&r);
     }
 }
 
@@ -1801,7 +1855,7 @@ void StripWindow::on_mouse_leave() noexcept {
     if (chevron_hover_) {
         chevron_hover_ = false;
         const RECT r = chevron_rect();
-        InvalidateRect(wnd_, &r, FALSE);
+        invalidate(&r);
     }
 }
 
@@ -2051,7 +2105,7 @@ void StripWindow::move_item(std::size_t from, std::size_t to) noexcept {
     hover_ = remap(hover_);
     anchor_index_ = remap(anchor_index_);
     relayout();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 bool StripWindow::begin_block_drag() noexcept {
@@ -2100,7 +2154,7 @@ bool StripWindow::begin_block_drag() noexcept {
         return false;
     }
     relayout();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
     return true;
 }
 
@@ -2155,7 +2209,7 @@ void StripWindow::restore_drag_order() noexcept {
     anchor_index_ = anchor_at;
     press_index_ = pressed ? drag_press_origin_ : no_index; // a press survives (set_items)
     relayout();
-    if (wnd_ != nullptr) InvalidateRect(wnd_, nullptr, FALSE);
+    if (wnd_ != nullptr) invalidate(nullptr);
 }
 
 void StripWindow::ensure_tooltip() noexcept {

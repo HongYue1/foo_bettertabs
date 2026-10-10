@@ -22,6 +22,7 @@
 #include "fbc/fonts.h"
 
 #include "../model/colour.h"
+#include "../model/font_size.h"
 #include "../platform/graphics.h"
 #include "../platform/logging.h"
 #include "../platform/perf.h"
@@ -1708,14 +1709,23 @@ bool TabsCore::run_configure(HWND parent) {
     original.ui_name = host_ui_name();
     original.highlight_name = host_highlight_name();
     try {
+        // As refresh_colours decides it: a custom background has its own lightness.
+        original.dark = settings_.strip_background == StripBackground::custom
+                            ? colour::lightness(settings_.background_argb & 0xFFFFFFu) <
+                                  colour::light_background_lightness
+                            : host_colours().dark;
+    } catch (...) {
+    }
+    try {
         StripFont font;
         StripTextOptions options;
         host_font(font, options);
         original.host_font_family = !font.family.empty() ? font.family : std::wstring(font.font.lfFaceName);
-        const float pt = font.size_dip > 0.0f ? font.size_dip * 72.0f / 96.0f
-                                              : std::fabs(static_cast<float>(font.font.lfHeight)) * 72.0f /
-                                                    static_cast<float>(font.font_dpi != 0 ? font.font_dpi : 96);
-        original.host_font_tenths = static_cast<std::uint32_t>(std::lround(pt * 10.0f));
+        // A GDI font keeps whole pixels: read back the size it was most likely picked at (8 pt,
+        // not the 8.3 that 11 px at 96 DPI works out to).
+        original.host_font_tenths =
+            font.size_dip > 0.0f ? static_cast<std::uint32_t>(std::lround(font.size_dip * 72.0f / 96.0f * 10.0f))
+                                 : tenths_from_pixels(std::fabs(static_cast<float>(font.font.lfHeight)), font.font_dpi);
     } catch (...) {
     }
     try {

@@ -35,6 +35,8 @@ struct ConfigureState {
     //! The host's font, for the Fonts page's "Default (...)" row and where its font dialog starts.
     std::wstring host_font_family;
     std::uint32_t host_font_tenths{90};
+    //! The strip is dark: where the Look page's fill slider rests while Automatic is ticked.
+    bool dark{true};
 };
 
 class ConfigureTarget {

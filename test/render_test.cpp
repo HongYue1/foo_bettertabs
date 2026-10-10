@@ -5,6 +5,7 @@
 //
 // Also reports paint time and allocations per full render as a rough budget check.
 
+#include <cstdlib>
 #include <windows.h>
 
 #include <wincodec.h>
@@ -516,6 +517,7 @@ int hover_test(HWND parent) {
         theme.background = colour::colorref_from_rgb(bg);
         theme.text = text;
         theme.dark = true;
+        theme.active_fill = static_cast<float>(s.accent_strength) / 100.0f; // as refresh_colours
         theme.accent = colour::colorref_from_rgb(colour::accent_for_background(cover_raw, bg));
         strip.set_theme(theme);
         StripFont font;
@@ -673,12 +675,16 @@ int hover_test(HWND parent) {
             }
         return sum;
     };
-    Settings lighten = active_none;
-    lighten.active_hover_lighten = true;
+    // A fill below strong_fill: on a stronger one the title is chosen for contrast (white or
+    // black), lighter or not.
+    Settings soft = active_none;
+    soft.accent_strength = 30;
+    Settings lighten = soft;
+    lighten.active_hover_text = HoverText::brighten;
     const Shot lit = shoot(lighten, 0, 0, grey);
-    const Shot unlit = shoot(active_none, 0, 0, grey);
+    const Shot unlit = shoot(soft, 0, 0, grey);
     check(title_light(lit) > title_light(unlit), "active tab, lighten: a grey title gets lighter");
-    check(shoot(lighten, 0).px == none.px, "active tab, lighten: white stays white");
+    check(shoot(lighten, 0).px == shoot(soft, 0).px, "active tab, lighten: white stays white");
 
     // Fade: right after the hover nothing shows yet; after the fade the full mark does.
     Settings fade = fill;
@@ -816,11 +822,71 @@ int transparent_test() {
     SetWindowPos(strip.hwnd(), nullptr, 250, 50, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     const Row moved = shoot(all, 250);
     check(moved.pattern == w && g_pattern_erases == 3, "after a move the backdrop follows the new place");
+    // Settings::transparent_opacity: half of the strip's background over the parent's.
+    s.transparent_opacity = 50;
+    strip.set_settings(s);
+    {
+        int bw = 0, bh = 0, stride = 0;
+        const std::uint8_t* bits = strip.render(all) ? strip.pixels(bw, bh, stride) : nullptr;
+        const std::uint32_t c = bits != nullptr ? reinterpret_cast<const std::uint32_t*>(bits)[w - 1] & 0xFFFFFFu : 0;
+        const auto half = [](std::uint32_t a, std::uint32_t b, int shift) {
+            return static_cast<int>((((a >> shift) & 0xFF) + ((b >> shift) & 0xFF)) / 2);
+        };
+        const auto close_to = [&](int shift) {
+            return std::abs(static_cast<int>((c >> shift) & 0xFF) - half(pattern_right, dark_bg, shift)) <= 2;
+        };
+        std::printf("      opacity 50%%: %06X\n", c);
+        check(bits != nullptr && close_to(16) && close_to(8) && close_to(0), "opacity: half the strip's background over the parent's");
+    }
+    s.transparent_opacity = 0;
+    strip.set_settings(s);
+    // A host repainting its background, then the strip without an erase (RedrawWindow with
+    // RDW_INVALIDATE only, as Jsplitter or a script panel does): the backdrop is fetched again.
+    // Our own invalidations keep reusing it. Needs real WM_PAINTs: the parent is shown, nearly
+    // invisible (layered, alpha 1), and not activated.
+    SetWindowLongPtrW(parent, GWL_EXSTYLE, GetWindowLongPtrW(parent, GWL_EXSTYLE) | WS_EX_LAYERED | WS_EX_TOOLWINDOW |
+                                               WS_EX_NOACTIVATE);
+    SetLayeredWindowAttributes(parent, 0, 1, LWA_ALPHA);
+    ShowWindow(parent, SW_SHOWNA);
+    ShowWindow(strip.hwnd(), SW_SHOWNA);
+    UpdateWindow(parent);
+    UpdateWindow(strip.hwnd());
+    const int before = g_pattern_erases;
+    strip.set_active(1);
+    UpdateWindow(strip.hwnd());
+    check(g_pattern_erases == before, "own invalidation: the backdrop is reused");
+    RedrawWindow(strip.hwnd(), nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    check(g_pattern_erases == before + 1, "host invalidation without an erase: the backdrop is fetched again");
+    ShowWindow(parent, SW_HIDE);
+
+    const int asked = g_pattern_erases;
     s.transparent_background = false;
     strip.set_settings(s);
     const Row solid = shoot(all, 250);
     check(solid.strip == w && solid.pattern == 0, "off: the strip's own background");
-    check(g_pattern_erases == 3, "off: the parent is not asked");
+    check(g_pattern_erases == asked, "off: the parent is not asked");
+    // Custom text colours (Colours page) are drawn as chosen.
+    s.custom_text = true;
+    s.text_argb = 0xFFFF0000u;
+    s.custom_active_text = true;
+    s.active_text_argb = 0xFF00FF00u;
+    strip.set_settings(s);
+    {
+        int bw = 0, bh = 0, stride = 0;
+        const std::uint8_t* bits = strip.render(all) ? strip.pixels(bw, bh, stride) : nullptr;
+        int red = 0, green = 0;
+        for (int y = 0; bits != nullptr && y < h && y < bh; ++y) {
+            const auto* line = reinterpret_cast<const std::uint32_t*>(bits + static_cast<std::size_t>(y) * stride);
+            for (int x = 0; x < w && x < bw; ++x) {
+                const std::uint32_t c = line[x];
+                const int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+                red += r > 200 && g < 60 && b < 60 ? 1 : 0;
+                green += g > 200 && r < 60 && b < 60 ? 1 : 0;
+            }
+        }
+        std::printf("      text colours: %d red px, %d green px\n", red, green);
+        check(red > 0 && green > 0, "custom text colours for the other tabs and the active one");
+    }
     strip.destroy();
     DestroyWindow(parent);
     return failures;

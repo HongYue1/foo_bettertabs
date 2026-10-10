@@ -117,10 +117,36 @@ erase the page behind the control first (`repaint_behind`). A plain `SetWindowTe
   (`StripWindow::hover_mark(active)`; same code as foo_enhancedplaylisttabs). `HoverStyle::plain`
   (active only, the default) is the old wash folded into the tab's own fill. `draw_tab` draws the
   mark (fill, outline via `fill_shape`, or underline) over the tab's own fill. The Hover page
-  edits one set at a time ("Settings for:"); the fade is shared.
+  edits one set at a time ("Settings for:"); writing the controls never reads them first
+  (`hover_to_controls`), title combo and title colour included (`HoverFields::text`,
+  `text_argb`). The fade is shared by both sets, so it is the first row, above "Settings for:".
+- The title of a hovered tab: `hover_text` / `active_hover_text` (`HoverText`: brighten,
+  unchanged, the hover colour, a custom colour in `*_hover_text_argb`). Brighten is "to the full
+  text colour" for the others and "lighter in OKLab, towards white" for the active tab. Up to 0.9
+  the active tab had a bool (`s_active_hover_lighten`); the codec still writes it (brighten = 1)
+  before `s_active_hover_text`, which wins.
+- Text colours (Colours page): `custom_text` / `text_argb` for the other tabs (else the theme's
+  text dimmed), `custom_active_text` / `active_text_argb` for the active tab and, when set, the
+  selected tabs. Picked colours (these and the custom hover title) skip the strong-fill contrast
+  rescue in `draw_tab` (`chosen`): the user asked for that colour.
+- Automatic fill strength (`accent_strength` 0) for a pill or tab is `auto_fill_dark` /
+  `auto_fill_light` (`settings.h`, 50 and 40 %; was 30 and 26). Both are at or above
+  `strong_fill`, so the active title is checked for contrast against the fill. The Look page's
+  slider rests on the matching value (`ConfigureState::dark`). Tests that need the title as drawn
+  set `accent_strength` below 40 (the render tests pass it to `StripTheme::active_fill`).
 - Transparent background (Colours page): the strip caches the parent's background
-  (`DrawThemeParentBackground`) and refetches it on erase, move and size; `TabsCore`'s erase
+  (`DrawThemeParentBackground`) and refetches it on erase, move, size, theme-background changes
+  and on any `WM_PAINT` whose rectangle is not inside what the strip invalidated itself
+  (`StripWindow::invalidate` keeps `own_dirty_`; never call `InvalidateRect(wnd_, ...)` directly
+  in the strip). So a host that repaints its background and invalidates its children without
+  `RDW_ERASE` is picked up; a host that never invalidates them can't be. `TabsCore`'s erase
   handler forwards it to the host. Not for the layered auto-hide strip.
+- `transparent_opacity` (Colours page, 0 = fully transparent): the strip's background at that
+  alpha over the backdrop, one `FillRectangle` of the dirty rect in `render`. `render_test`
+  `transparent_test` covers the reuse, the refetch without an erase (real `WM_PAINT`s: the parent
+  is shown layered at alpha 1), the opacity and the text colours.
+- The Fonts page's Default shows the host size read back from whole pixels with
+  `tenths_from_pixels` (`src/model/font_size.h`): 11 px at 96 DPI is 8 pt, not 8.3.
 - The fade keeps a `hover_level` per `Item` (so it moves with reorders) and is read only while
   `hover_fading_`; otherwise `index == hover_` decides. Anything that resets `hover_` on an item
   change must call `stop_hover_fade()`.
@@ -171,6 +197,7 @@ The cover colour and contrast code has its own tests in `fb2k-common\test\`.
 | `src/hosts/configure_dialog.cpp` | The Configure dialog |
 | `src/model/settings.cpp`, `codec.cpp` | Settings and their storage |
 | `src/model/cover_accent.h`, `colour.h` | Accent colour from the cover (forwarders to `fb2k-common`) |
+| `src/model/font_size.h` | Point size behind a GDI font height (Fonts page Default) |
 | `src/strip/strip_window.cpp` | The strip: drawing, input, tooltips |
 | `src/strip/strip_layout.cpp` | Tab positions and overflow |
 | `src/strip/hot_zone.cpp` | The auto-hide hot zone |

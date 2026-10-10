@@ -290,6 +290,8 @@ private:
     void release_backdrop() noexcept;
     //! Asks the parent for its background over the whole client area (DrawThemeParentBackground).
     void refresh_backdrop() noexcept;
+    //! InvalidateRect, remembering the area (own_dirty_): a paint outside it came from the host.
+    void invalidate(const RECT* r) noexcept;
 
     [[nodiscard]] bool horizontal() const noexcept;
     //! A side strip with text turned 90 degrees.
@@ -461,6 +463,8 @@ private:
     //! The backdrop must be fetched again before the next paint: the strip moved or was resized,
     //! or someone erased it (a host repainting its background invalidates with RDW_ERASE).
     bool backdrop_stale_{true};
+    //! What the strip invalidated itself since the last paint (union; empty = nothing).
+    RECT own_dirty_{};
     com_ptr<ID2D1DCRenderTarget> target_;
     com_ptr<ID2D1SolidColorBrush> brush_;
     bool cleartype_{false};

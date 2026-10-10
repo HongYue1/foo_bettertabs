@@ -260,6 +260,9 @@ constexpr Swatch swatches[] = {
     {IDC_ACCENT_SWATCH, IDC_ACCENT_HEX, &Settings::accent_argb},
     {IDC_BACKGROUND_SWATCH, IDC_BACKGROUND_HEX, &Settings::background_argb},
     {IDC_HOVER_SWATCH, IDC_HOVER_HEX, &Settings::hover_argb},
+    {IDC_HOVER_TEXT_SWATCH, IDC_HOVER_TEXT_HEX, &Settings::hover_text_argb},
+    {IDC_TEXT_SWATCH, IDC_TEXT_HEX, &Settings::text_argb},
+    {IDC_ACTIVE_TEXT_SWATCH, IDC_ACTIVE_TEXT_HEX, &Settings::active_text_argb},
 };
 //! The Hover page edits one of two sets: the other tabs' (Settings::hover_*) or the active tab's.
 struct HoverFields {
@@ -269,13 +272,17 @@ struct HoverFields {
     std::uint8_t Settings::*fill_strength;
     std::uint8_t Settings::*line_width;
     std::uint8_t Settings::*line_opacity;
+    HoverText Settings::*text;
+    std::uint32_t Settings::*text_argb;
 };
 constexpr HoverFields hover_others{&Settings::hover_style,         &Settings::hover_colour,
                                    &Settings::hover_argb,          &Settings::hover_fill_strength,
-                                   &Settings::hover_line_width,    &Settings::hover_line_opacity};
+                                   &Settings::hover_line_width,    &Settings::hover_line_opacity,
+                                   &Settings::hover_text,          &Settings::hover_text_argb};
 constexpr HoverFields hover_active{&Settings::active_hover_style,         &Settings::active_hover_colour,
                                    &Settings::active_hover_argb,          &Settings::active_hover_fill_strength,
-                                   &Settings::active_hover_line_width,    &Settings::active_hover_line_opacity};
+                                   &Settings::active_hover_line_width,    &Settings::active_hover_line_opacity,
+                                   &Settings::active_hover_text,          &Settings::active_hover_text_argb};
 //! The style list: the HoverStyle values in order; the active tab's starts with its plain wash.
 [[nodiscard]] int hover_style_index(HoverStyle style, bool active) noexcept {
     if (!active) return style == HoverStyle::plain ? 0 : static_cast<int>(style);
@@ -401,7 +408,9 @@ private:
     bool hover_active_{false};
     [[nodiscard]] const HoverFields& hover_fields() const noexcept { return hover_active_ ? hover_active : hover_others; }
     [[nodiscard]] std::uint32_t Settings::*swatch_field(const Swatch& swatch) const noexcept {
-        return swatch.button == IDC_HOVER_SWATCH ? hover_fields().argb : swatch.field;
+        if (swatch.button == IDC_HOVER_SWATCH) return hover_fields().argb;
+        if (swatch.button == IDC_HOVER_TEXT_SWATCH) return hover_fields().text_argb;
+        return swatch.field;
     }
     void fill_hover_styles();
     void hover_to_controls();
@@ -450,7 +459,7 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_hover_styles();
     // Order matters: HoverColour and HoverText, one for one.
     fill_combo(control(IDC_HOVER_COLOUR), {L"Text colour", L"Accent colour", L"Custom colour"});
-    fill_combo(control(IDC_HOVER_TEXT), {L"Brightens", L"Stays as it is", L"Takes the hover colour"});
+    fill_combo(control(IDC_HOVER_TEXT), {L"Brightens", L"Stays as it is", L"Takes the hover colour", L"Custom colour"});
     // Order matters: AccentSource and StripBackground, one for one.
     const std::wstring ui = state_.ui_name != nullptr ? state_.ui_name : L"Columns UI";
     const std::wstring ui_selection = ui + L" selection colour";
@@ -562,17 +571,21 @@ void ConfigureDialog::settings_to_controls() {
     check(IDC_CHIP, s.chip);
     set_number(IDC_RADIUS, s.corner_radius);
     check(IDC_STRENGTH_AUTO, s.accent_strength == 0);
-    set_slider(IDC_STRENGTH, 5, 100, s.accent_strength == 0 ? 35 : s.accent_strength);
+    set_slider(IDC_STRENGTH, 5, 100,
+               s.accent_strength != 0 ? s.accent_strength : (state_.dark ? auto_fill_dark : auto_fill_light));
     select(IDC_ACCENT_SOURCE, static_cast<int>(s.accent_source));
     ::SetWindowTextW(control(IDC_ACCENT_HEX), format_rgb(s.accent_argb).c_str());
     select(IDC_BACKGROUND, static_cast<int>(s.strip_background));
     ::SetWindowTextW(control(IDC_BACKGROUND_HEX), format_rgb(s.background_argb).c_str());
     set_slider(IDC_TINT, 2, 60, s.tint_strength);
     check(IDC_TRANSPARENT, s.transparent_background);
+    set_slider(IDC_TRANSPARENT_OPACITY, 0, 100, s.transparent_opacity);
+    check(IDC_TEXT_CUSTOM, s.custom_text);
+    ::SetWindowTextW(control(IDC_TEXT_HEX), format_rgb(s.text_argb).c_str());
+    check(IDC_ACTIVE_TEXT_CUSTOM, s.custom_active_text);
+    ::SetWindowTextW(control(IDC_ACTIVE_TEXT_HEX), format_rgb(s.active_text_argb).c_str());
 
     hover_to_controls();
-    select(IDC_HOVER_TEXT, static_cast<int>(s.hover_text));
-    check(IDC_HOVER_LIGHTEN, s.active_hover_lighten);
     check(IDC_HOVER_FADE, s.hover_fade);
     set_number(IDC_HOVER_FADE_MS, s.hover_fade_ms);
 
@@ -597,9 +610,7 @@ void ConfigureDialog::settings_to_controls() {
     loading_ = false;
     update_values();
     update_enabled();
-    ::InvalidateRect(control(IDC_ACCENT_SWATCH), nullptr, FALSE);
-    ::InvalidateRect(control(IDC_BACKGROUND_SWATCH), nullptr, FALSE);
-    ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
+    for (const Swatch& swatch : swatches) ::InvalidateRect(control(swatch.button), nullptr, FALSE);
 }
 
 void ConfigureDialog::fill_hover_styles() {
@@ -626,10 +637,11 @@ void ConfigureDialog::hover_to_controls() {
     set_number(IDC_HOVER_LINE_WIDTH, s.*h.line_width);
     check(IDC_HOVER_LINE_AUTO, s.*h.line_opacity == 0);
     set_slider(IDC_HOVER_LINE, 10, 100, s.*h.line_opacity == 0 ? 50 : s.*h.line_opacity);
-    // The title row: the others' choice of colour, or the active tab's lighten box.
-    ::ShowWindow(control(IDC_HOVER_TEXT), hover_active_ ? SW_HIDE : SW_SHOWNA);
-    ::ShowWindow(control(IDC_HOVER_LIGHTEN), hover_active_ ? SW_SHOWNA : SW_HIDE);
+    // "Brightens" is the full text colour for the others, lighter (towards white) for the active tab.
+    select(IDC_HOVER_TEXT, static_cast<int>(s.*h.text));
+    ::SetWindowTextW(control(IDC_HOVER_TEXT_HEX), format_rgb(s.*h.text_argb).c_str());
     ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
+    ::InvalidateRect(control(IDC_HOVER_TEXT_SWATCH), nullptr, FALSE);
 }
 
 void ConfigureDialog::settings_from_controls() {
@@ -666,6 +678,11 @@ void ConfigureDialog::settings_from_controls() {
     s.background_argb = parse_rgb(window_text(control(IDC_BACKGROUND_HEX)), s.background_argb);
     s.tint_strength = static_cast<std::uint8_t>(std::clamp(slider(IDC_TINT), 2, 60));
     s.transparent_background = checked(IDC_TRANSPARENT);
+    s.transparent_opacity = static_cast<std::uint8_t>(std::clamp(slider(IDC_TRANSPARENT_OPACITY), 0, 100));
+    s.custom_text = checked(IDC_TEXT_CUSTOM);
+    s.text_argb = parse_rgb(window_text(control(IDC_TEXT_HEX)), s.text_argb);
+    s.custom_active_text = checked(IDC_ACTIVE_TEXT_CUSTOM);
+    s.active_text_argb = parse_rgb(window_text(control(IDC_ACTIVE_TEXT_HEX)), s.active_text_argb);
 
     const HoverFields& h = hover_fields();
     if (const LRESULT index = selection(IDC_HOVER_STYLE); index != CB_ERR) s.*h.style = hover_style_at(index, hover_active_);
@@ -676,8 +693,8 @@ void ConfigureDialog::settings_from_controls() {
     s.*h.line_width = static_cast<std::uint8_t>((std::min)(number(IDC_HOVER_LINE_WIDTH), std::uint16_t{8}));
     s.*h.line_opacity =
         checked(IDC_HOVER_LINE_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_HOVER_LINE), 10, 100));
-    pick(IDC_HOVER_TEXT, s.hover_text);
-    s.active_hover_lighten = checked(IDC_HOVER_LIGHTEN);
+    pick(IDC_HOVER_TEXT, s.*h.text);
+    s.*h.text_argb = parse_rgb(window_text(control(IDC_HOVER_TEXT_HEX)), s.*h.text_argb);
     s.hover_fade = checked(IDC_HOVER_FADE);
     s.hover_fade_ms = number(IDC_HOVER_FADE_MS);
 
@@ -708,6 +725,8 @@ void ConfigureDialog::update_values() {
     set_label(IDC_STRENGTH_VALUE, checked(IDC_STRENGTH_AUTO) ? L"" : text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_TINT));
     set_label(IDC_TINT_VALUE, text);
+    std::swprintf(text, 16, L"%d%%", slider(IDC_TRANSPARENT_OPACITY));
+    set_label(IDC_TRANSPARENT_OPACITY_VALUE, text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_HOVER_FILL));
     set_label(IDC_HOVER_FILL_VALUE, checked(IDC_HOVER_FILL_AUTO) ? L"" : text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_HOVER_LINE));
@@ -775,6 +794,12 @@ void ConfigureDialog::update_enabled() {
     const bool tint = s.strip_background == StripBackground::accent_tint;
     enable(IDC_TINT, tint);
     enable(IDC_TINT_VALUE, tint);
+    enable(IDC_TRANSPARENT_OPACITY, s.transparent_background);
+    enable(IDC_TRANSPARENT_OPACITY_VALUE, s.transparent_background);
+    enable(IDC_TEXT_HEX, s.custom_text);
+    enable(IDC_TEXT_SWATCH, s.custom_text);
+    enable(IDC_ACTIVE_TEXT_HEX, s.custom_active_text);
+    enable(IDC_ACTIVE_TEXT_SWATCH, s.custom_active_text);
 
     // Hover: each control only where the chosen style uses it.
     const HoverFields& h = hover_fields();
@@ -784,11 +809,13 @@ void ConfigureDialog::update_enabled() {
                             hs == HoverStyle::underline || hs == HoverStyle::underline_fill;
     // The plain wash is always the text colour.
     const bool hover_tinted = (hs != HoverStyle::none && hs != HoverStyle::plain) ||
-                              (!hover_active_ && s.hover_text == HoverText::colour);
+                              s.*h.text == HoverText::colour;
     enable(IDC_HOVER_COLOUR, hover_tinted);
     const bool custom_hover = hover_tinted && s.*h.colour == HoverColour::custom;
     enable(IDC_HOVER_HEX, custom_hover);
     enable(IDC_HOVER_SWATCH, custom_hover);
+    enable(IDC_HOVER_TEXT_HEX, s.*h.text == HoverText::custom);
+    enable(IDC_HOVER_TEXT_SWATCH, s.*h.text == HoverText::custom);
     enable(IDC_HOVER_FILL_AUTO, hover_fill);
     enable(IDC_HOVER_FILL, hover_fill && s.*h.fill_strength != 0);
     enable(IDC_HOVER_FILL_VALUE, hover_fill && s.*h.fill_strength != 0);
@@ -798,7 +825,7 @@ void ConfigureDialog::update_enabled() {
     enable(IDC_HOVER_LINE_VALUE, hover_line && s.*h.line_opacity != 0);
     // The fade is shared: it matters while either set shows something.
     const bool fades = s.hover_style != HoverStyle::none || s.hover_text != HoverText::unchanged ||
-                       s.active_hover_style != HoverStyle::none || s.active_hover_lighten;
+                       s.active_hover_style != HoverStyle::none || s.active_hover_text != HoverText::unchanged;
     enable(IDC_HOVER_FADE, fades);
     enable(IDC_HOVER_FADE_MS, s.hover_fade && fades);
 
@@ -956,7 +983,10 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
         return;
     case IDC_ACCENT_SWATCH:
     case IDC_BACKGROUND_SWATCH:
-    case IDC_HOVER_SWATCH: {
+    case IDC_HOVER_SWATCH:
+    case IDC_HOVER_TEXT_SWATCH:
+    case IDC_TEXT_SWATCH:
+    case IDC_ACTIVE_TEXT_SWATCH: {
         if (code != BN_CLICKED) return;
         const Swatch& swatch = swatch_for(id);
         const int hex = swatch.hex;
@@ -1035,9 +1065,9 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
     }
     if (code == EN_CHANGE || code == BN_CLICKED || code == CBN_SELCHANGE) {
         settings_from_controls();
-        if (id == IDC_ACCENT_HEX) ::InvalidateRect(control(IDC_ACCENT_SWATCH), nullptr, FALSE);
-        if (id == IDC_BACKGROUND_HEX) ::InvalidateRect(control(IDC_BACKGROUND_SWATCH), nullptr, FALSE);
-        if (id == IDC_HOVER_HEX) ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
+        for (const Swatch& swatch : swatches) {
+            if (id == swatch.hex) ::InvalidateRect(control(swatch.button), nullptr, FALSE);
+        }
         changed();
     }
 }
@@ -1046,7 +1076,7 @@ LRESULT ConfigureDialog::on_hscroll(UINT, WPARAM, LPARAM lparam) {
     const auto bar = reinterpret_cast<HWND>(lparam);
     if (loading_ || bar == nullptr ||
         (bar != control(IDC_STRENGTH) && bar != control(IDC_TINT) && bar != control(IDC_HOVER_FILL) &&
-         bar != control(IDC_HOVER_LINE))) {
+         bar != control(IDC_HOVER_LINE) && bar != control(IDC_TRANSPARENT_OPACITY))) {
         SetMsgHandled(FALSE);
         return 0;
     }
@@ -1056,8 +1086,13 @@ LRESULT ConfigureDialog::on_hscroll(UINT, WPARAM, LPARAM lparam) {
 }
 
 void ConfigureDialog::on_draw_item(UINT, LPDRAWITEMSTRUCT item) {
-    if (item == nullptr || (item->CtlID != IDC_ACCENT_SWATCH && item->CtlID != IDC_BACKGROUND_SWATCH &&
-                            item->CtlID != IDC_HOVER_SWATCH)) {
+    const auto is_swatch = [](UINT id) {
+        for (const Swatch& swatch : swatches) {
+            if (static_cast<UINT>(swatch.button) == id) return true;
+        }
+        return false;
+    };
+    if (item == nullptr || !is_swatch(item->CtlID)) {
         SetMsgHandled(FALSE);
         return;
     }

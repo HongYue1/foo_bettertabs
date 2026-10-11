@@ -6,16 +6,18 @@
 // IDC_STATIC (-1) comes from winres.h and is used for labels nobody needs to address.
 
 #define IDD_CONFIGURE 101
-// The Configure dialog's pages, consecutive and in tab order.
+// The Configure dialog's pages (tab order: page_ids in configure_dialog.cpp).
 #define IDD_PAGE_STRIP 102
 #define IDD_PAGE_LOOK 103
 #define IDD_PAGE_HOVER 104
 #define IDD_PAGE_COLOURS 105
 #define IDD_PAGE_FONTS 106
 #define IDD_PAGE_TABS 107
-#define IDD_PAGE_BEHAVIOUR 108
-#define IDD_PAGE_AUTOHIDE 109
+#define IDD_PAGE_PANELS 108
+#define IDD_PAGE_VISIBILITY 109
 #define IDD_RENAME 110
+#define IDD_PAGE_INPUT 111
+#define IDD_PAGE_ANIMATION 112
 
 #define IDC_TABS 1000
 // Where the pages go; never shown.
@@ -74,7 +76,7 @@
 #define IDC_REMOVE 1061
 #define IDC_CHARMAP 1062
 
-// Behaviour
+// Panels, Input, Animation
 #define IDC_WHEEL 1070
 #define IDC_DRAG 1071
 #define IDC_CTRL_TAB 1072
@@ -85,7 +87,7 @@
 #define IDC_SWITCH_ANIM 1077
 #define IDC_SWITCH_MS 1078
 
-// Auto-hide
+// Visibility
 #define IDC_AH_MODE 1080
 #define IDC_AH_ANIM 1081
 #define IDC_AH_ANIM_MS 1082
@@ -103,6 +105,13 @@
 
 // Look (added later)
 #define IDC_LINE_WIDTH 1212
+#define IDC_CHIP_COLOUR 1213
+#define IDC_CHIP_HEX 1214
+#define IDC_CHIP_SWATCH 1215
+#define IDC_CHIP_STRENGTH_AUTO 1216
+#define IDC_CHIP_STRENGTH 1217
+#define IDC_CHIP_STRENGTH_VALUE 1218
+#define IDC_LINE_WIDTH_AUTO 1219
 
 // Fonts. The fallback rows are consecutive: text, Select and Clear of row 1, 2, 3.
 #define IDC_FONT_TEXT 1200
@@ -127,6 +136,22 @@
 #define IDC_HOVER_LINE_VALUE 1311
 #define IDC_HOVER_FADE 1312
 #define IDC_HOVER_FADE_MS 1313
-#define IDC_HOVER_TARGET 1314
 #define IDC_HOVER_TEXT_HEX 1316
 #define IDC_HOVER_TEXT_SWATCH 1317
+#define IDC_HOVER_LINE_WIDTH_AUTO 1318
+// Hover, the active tab's column
+#define IDC_HOVER_ACTIVE_STYLE 1320
+#define IDC_HOVER_ACTIVE_COLOUR 1321
+#define IDC_HOVER_ACTIVE_HEX 1322
+#define IDC_HOVER_ACTIVE_SWATCH 1323
+#define IDC_HOVER_ACTIVE_TEXT 1324
+#define IDC_HOVER_ACTIVE_FILL_AUTO 1325
+#define IDC_HOVER_ACTIVE_FILL 1326
+#define IDC_HOVER_ACTIVE_FILL_VALUE 1327
+#define IDC_HOVER_ACTIVE_LINE_WIDTH 1328
+#define IDC_HOVER_ACTIVE_LINE_AUTO 1329
+#define IDC_HOVER_ACTIVE_LINE 1330
+#define IDC_HOVER_ACTIVE_LINE_VALUE 1331
+#define IDC_HOVER_ACTIVE_TEXT_HEX 1332
+#define IDC_HOVER_ACTIVE_TEXT_SWATCH 1333
+#define IDC_HOVER_ACTIVE_LINE_WIDTH_AUTO 1334

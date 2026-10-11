@@ -1,6 +1,6 @@
-// The Configure dialog and the Rename dialog. Layout: foo_bettertabs.rc (style profile at the top);
-// conventions: one child dialog per
-// page with its own dark-mode hooks, guarded WM_NOTIFY, padded edits, swatch + hex colours).
+// The Configure dialog and the Rename dialog. Layout: foo_bettertabs.rc (style profile at the
+// top). Conventions: one child dialog per page with its own dark-mode hooks, guarded WM_NOTIFY,
+// padded edits, swatch + hex colours, tooltips from the tips table.
 
 #include <helpers/foobar2000+atl.h>
 
@@ -32,7 +32,174 @@ namespace bettertabs {
 
 namespace {
 
-constexpr int page_count = 8;
+constexpr int page_count = 10;
+//! In tab order, with their tab names.
+constexpr int page_ids[page_count] = {IDD_PAGE_STRIP,  IDD_PAGE_LOOK,      IDD_PAGE_HOVER,  IDD_PAGE_COLOURS,
+                                      IDD_PAGE_FONTS,  IDD_PAGE_TABS,      IDD_PAGE_ANIMATION,
+                                      IDD_PAGE_PANELS, IDD_PAGE_INPUT,     IDD_PAGE_VISIBILITY};
+constexpr const wchar_t* page_names[page_count] = {L"Strip", L"Look", L"Hover",     L"Colours", L"Fonts",
+                                                   L"Tabs",  L"Animation", L"Panels", L"Input", L"Visibility"};
+//! Where an automatic line width's edit rests (the width it draws at 96 DPI).
+[[nodiscard]] int auto_line_width(bool outline) noexcept { return outline ? 1 : 2; }
+//! Where a hover fill slider rests while Automatic is ticked.
+[[nodiscard]] int auto_hover_fill_for(bool active) noexcept { return active ? auto_active_hover_fill : auto_hover_fill; }
+
+//! Tooltips: a control's tip also shows on its label (the static before it, ending in a colon).
+//! Ranges, what 0 or Automatic means, and anything not clear at first glance live here, so the
+//! pages keep short labels and bare units.
+struct Tip {
+    int id;
+    const wchar_t* text;
+};
+constexpr const wchar_t* tip_hex = L"The colour as hex RRGGBB. Click the swatch to pick one.";
+constexpr const wchar_t* tip_swatch = L"Pick a colour.";
+constexpr const wchar_t* tip_hover_colour = L"Text colour: a neutral wash. Accent colour: the accent from the Colours page.";
+constexpr const wchar_t* tip_hover_fill_auto = L"Automatic: 18% on the other tabs, 23% on the active tab.";
+constexpr const wchar_t* tip_hover_fill = L"How strong the hover fill is (2-100%).";
+constexpr const wchar_t* tip_hover_width_auto = L"Automatic: 2 px for an underline, thinner for an outline.";
+constexpr const wchar_t* tip_hover_width = L"Width of the outline or underline (1-8 px).";
+constexpr const wchar_t* tip_hover_line_auto = L"Automatic: 50% in the text colour, full strength in any other colour.";
+constexpr const wchar_t* tip_hover_line = L"How strong the outline or underline is (10-100%).";
+constexpr const wchar_t* tip_fallback =
+    L"Tried in this order for characters the tab font cannot draw. Only the family is used: size, weight "
+    L"and italic follow the tab font. The built-in fallbacks (emoji, then Windows') come after these.";
+constexpr const wchar_t* tip_font =
+    L"Default follows the Columns UI font for these tabs (Colours and fonts), or the Default UI tab font. "
+    L"Picked sizes are exact; tab icons keep their icon font.";
+constexpr const wchar_t* tip_ms = L"Length of the animation (50-1000 ms).";
+constexpr Tip tips[] = {
+    {IDC_DEFAULTS, L"Puts every setting on every page back to its default. Cancel still undoes it."},
+    // Strip
+    {IDC_POSITION, L"The edge of the panel the strip sits on."},
+    {IDC_THICKNESS, L"Height of a top or bottom strip, width of a side strip. 0 = from the font, or 1-200 px."},
+    {IDC_ROTATE, L"On a left or right strip, titles run along the strip. Off: titles stay level and the strip grows "
+                 L"as wide as its longest title."},
+    {IDC_SIZING, L"Fit the title: each tab as wide as its title. All equal: every tab as wide as the widest. "
+                 L"Fill the strip: the tabs share all of its length."},
+    {IDC_ALIGN, L"Where the tabs sit when they do not fill the strip."},
+    {IDC_CHEVRON, L"Where the chevron for the tabs that do not fit sits."},
+    {IDC_SHRINK, L"When the tabs do not fit, the longest titles get shorter (with an ellipsis) before tabs move to the "
+                 L"chevron. Off: titles stay whole."},
+    {IDC_MAX_WIDTH, L"Longer titles are cut with an ellipsis and shown whole in a tooltip. 0 = no limit, or 1-2000 px."},
+    {IDC_PAD_X, L"Space before and after the title (0-64 px)."},
+    {IDC_PAD_Y, L"Space above and below the title (0-64 px)."},
+    {IDC_SPACING, L"Gap between two tabs (0-64 px)."},
+    // Look
+    {IDC_CHIP, L"Every tab gets a rounded fill of its own; the active tab's stands out."},
+    {IDC_CHIP_COLOUR, L"Text colour: a neutral wash. Accent colour: the accent from the Colours page."},
+    {IDC_CHIP_HEX, tip_hex},
+    {IDC_CHIP_SWATCH, tip_swatch},
+    {IDC_CHIP_STRENGTH_AUTO, L"Automatic: 18% on a dark strip, 15% on a light one."},
+    {IDC_CHIP_STRENGTH, L"How strong the chips' fill is (2-100%)."},
+    {IDC_RADIUS, L"Rounding of chips, pills and tabs (0-32 px)."},
+    {IDC_ICONS_ONLY, L"Tabs with an icon (Tabs page) show just the icon; the title is the tooltip."},
+    {IDC_INDICATOR, L"How the active tab is marked. Tab: a fill joined to the panel. Outlined tab: the same shape, "
+                    L"outlined. Text only: just its brighter title."},
+    {IDC_LINE_WIDTH_AUTO, L"Automatic: 2 px for the underline, thinner for the outline."},
+    {IDC_LINE_WIDTH, L"Width of the underline or the outline (1-8 px)."},
+    {IDC_STRENGTH_AUTO, L"Automatic: 50% on a dark strip, 40% on a light one."},
+    {IDC_STRENGTH, L"How strong the active tab's pill, tab or chip fill is (2-100%)."},
+    // Hover
+    {IDC_HOVER_STYLE, L"How a tab is marked while the pointer is over it."},
+    {IDC_HOVER_ACTIVE_STYLE, L"How the active tab is marked while the pointer is over it. Plain wash: a faint "
+                             L"wash in the text colour."},
+    {IDC_HOVER_COLOUR, tip_hover_colour},
+    {IDC_HOVER_ACTIVE_COLOUR, tip_hover_colour},
+    {IDC_HOVER_HEX, tip_hex},
+    {IDC_HOVER_ACTIVE_HEX, tip_hex},
+    {IDC_HOVER_SWATCH, tip_swatch},
+    {IDC_HOVER_ACTIVE_SWATCH, tip_swatch},
+    {IDC_HOVER_TEXT, L"What the title does on hover. Brightens: takes the active tab's text colour."},
+    {IDC_HOVER_ACTIVE_TEXT, L"What the active tab's title does on hover. Brightens: gets lighter, towards white."},
+    {IDC_HOVER_TEXT_HEX, L"Used with Title: Custom colour. Hex RRGGBB; click the swatch to pick one."},
+    {IDC_HOVER_ACTIVE_TEXT_HEX, L"Used with Title: Custom colour. Hex RRGGBB; click the swatch to pick one."},
+    {IDC_HOVER_TEXT_SWATCH, tip_swatch},
+    {IDC_HOVER_ACTIVE_TEXT_SWATCH, tip_swatch},
+    {IDC_HOVER_FILL_AUTO, tip_hover_fill_auto},
+    {IDC_HOVER_ACTIVE_FILL_AUTO, tip_hover_fill_auto},
+    {IDC_HOVER_FILL, tip_hover_fill},
+    {IDC_HOVER_ACTIVE_FILL, tip_hover_fill},
+    {IDC_HOVER_LINE_WIDTH_AUTO, tip_hover_width_auto},
+    {IDC_HOVER_ACTIVE_LINE_WIDTH_AUTO, tip_hover_width_auto},
+    {IDC_HOVER_LINE_WIDTH, tip_hover_width},
+    {IDC_HOVER_ACTIVE_LINE_WIDTH, tip_hover_width},
+    {IDC_HOVER_LINE_AUTO, tip_hover_line_auto},
+    {IDC_HOVER_ACTIVE_LINE_AUTO, tip_hover_line_auto},
+    {IDC_HOVER_LINE, tip_hover_line},
+    {IDC_HOVER_ACTIVE_LINE, tip_hover_line},
+    // Colours
+    {IDC_ACCENT_SOURCE, L"The colour of the active tab's mark. From the playing cover: taken from the playing "
+                        L"track's cover art."},
+    {IDC_ACCENT_HEX, tip_hex},
+    {IDC_ACCENT_SWATCH, tip_swatch},
+    {IDC_TEXT_CUSTOM, L"Your own colour for the other tabs' titles, used exactly as picked. Off: the theme's text, "
+                      L"dimmed."},
+    {IDC_TEXT_HEX, tip_hex},
+    {IDC_TEXT_SWATCH, tip_swatch},
+    {IDC_ACTIVE_TEXT_CUSTOM, L"Your own colour for the active and selected tabs' titles, used exactly as picked. "
+                             L"Off: the theme's text."},
+    {IDC_ACTIVE_TEXT_HEX, tip_hex},
+    {IDC_ACTIVE_TEXT_SWATCH, tip_swatch},
+    {IDC_BACKGROUND, L"Tinted with the accent: the theme's background with some of the accent mixed in."},
+    {IDC_BACKGROUND_HEX, tip_hex},
+    {IDC_BACKGROUND_SWATCH, tip_swatch},
+    {IDC_TINT, L"How much accent goes into a tinted background (2-100%)."},
+    {IDC_TRANSPARENT, L"The strip shows the layout's own background, such as a Columns UI theme's image; tabs keep "
+                      L"their fills. Not while auto-hide shows the strip over the panel."},
+    {IDC_TRANSPARENT_OPACITY, L"How much of the strip's own background still covers the layout's (0-100%, 0 = fully "
+                              L"transparent)."},
+    // Fonts
+    {IDC_FONT_TEXT, tip_font},
+    {IDC_FONT_PICK, tip_font},
+    {IDC_FONT_CLEAR, tip_font},
+    {IDC_FALLBACK_TEXT, tip_fallback},
+    {IDC_FALLBACK_TEXT + 1, tip_fallback},
+    {IDC_FALLBACK_TEXT + 2, tip_fallback},
+    {IDC_FALLBACK_PICK, tip_fallback},
+    {IDC_FALLBACK_PICK + 1, tip_fallback},
+    {IDC_FALLBACK_PICK + 2, tip_fallback},
+    {IDC_FALLBACK_CLEAR, tip_fallback},
+    {IDC_FALLBACK_CLEAR + 1, tip_fallback},
+    {IDC_FALLBACK_CLEAR + 2, tip_fallback},
+    // Tabs
+    {IDC_TAB_LIST, L"Every panel in this container, in strip order, with its own title if it has one."},
+    {IDC_REMOVE, L"Removes the tab and its panel when you click OK."},
+    {IDC_TAB_TITLE, L"Your title for the tab. Empty: the panel's own name."},
+    {IDC_TAB_TITLE_HELP, L"Opens foobar2000's title formatting help."},
+    {IDC_TAB_FORMAT, L"The title is a title formatting pattern."},
+    {IDC_TAB_ICON, L"A code point (such as E8D6) or the character itself. Icons: Segoe Fluent Icons. Emoji: Win+. "
+                   L"(period)."},
+    {IDC_CHARMAP, L"Opens Character Map to copy a Segoe Fluent Icons glyph (or Microsoft's icon list when Character "
+                  L"Map is missing)."},
+    {IDC_TAB_HIDDEN, L"The tab leaves the strip; Show hidden tab in the strip menu brings it back."},
+    {IDC_TAB_ON_PLAY, L"This tab becomes the active one when playback starts."},
+    {IDC_TAB_ON_STOP, L"This tab becomes the active one when playback stops."},
+    // Animation
+    {IDC_SWITCH_ANIM, L"The active tab's mark slides over to the new tab."},
+    {IDC_SWITCH_MS, tip_ms},
+    {IDC_HOVER_FADE, L"The hover mark fades in and out."},
+    {IDC_HOVER_FADE_MS, tip_ms},
+    {IDC_AH_ANIM, L"How an auto-hiding strip appears and goes."},
+    {IDC_AH_ANIM_MS, tip_ms},
+    // Panels
+    {IDC_LAZY, L"A panel is created the first time its tab is shown, for a faster startup. Off: all panels are "
+               L"created at once."},
+    {IDC_REMEMBER, L"The tab that was active last time is active again at startup. Off: the first tab."},
+    // Input
+    {IDC_MIDDLE, L"Hide tab: the tab leaves the strip; Show hidden tab in the strip menu brings it back."},
+    {IDC_WHEEL, L"The wheel over the strip switches to the next or previous tab."},
+    {IDC_DRAG, L"Drag a tab to move it; a selected tab brings the whole selection along. Esc cancels."},
+    {IDC_CTRL_TAB, L"Ctrl+Tab and Ctrl+Shift+Tab, while the keyboard focus is inside the container."},
+    // Visibility
+    {IDC_VISIBILITY, L"Only with two or more tabs: no strip for a single tab. Auto-hide: the strip shows when the "
+                     L"pointer reaches its edge."},
+    {IDC_AH_MODE, L"Over the panel: the strip covers the edge of the panel. Push the panel aside: the panel makes room."},
+    {IDC_AH_HOT_ZONE, L"How close to the edge the pointer has to come (1-32 px)."},
+    {IDC_AH_REVEAL, L"Time in the hot zone before the strip shows (0-5000 ms)."},
+    {IDC_AH_HIDE, L"Time after the pointer leaves before the strip hides (0-5000 ms). It also stays while its menu is "
+                  L"open, during a drag and while it has the keyboard focus."},
+    {IDC_AH_LINGER, L"How long the strip stays at least after a tab switch (0-5000 ms)."},
+};
 
 //! A control by id on the dialog itself or on one of its pages (ids are unique across pages).
 [[nodiscard]] HWND find_control(HWND dialog, int control) {
@@ -261,10 +428,14 @@ constexpr Swatch swatches[] = {
     {IDC_BACKGROUND_SWATCH, IDC_BACKGROUND_HEX, &Settings::background_argb},
     {IDC_HOVER_SWATCH, IDC_HOVER_HEX, &Settings::hover_argb},
     {IDC_HOVER_TEXT_SWATCH, IDC_HOVER_TEXT_HEX, &Settings::hover_text_argb},
+    {IDC_HOVER_ACTIVE_SWATCH, IDC_HOVER_ACTIVE_HEX, &Settings::active_hover_argb},
+    {IDC_HOVER_ACTIVE_TEXT_SWATCH, IDC_HOVER_ACTIVE_TEXT_HEX, &Settings::active_hover_text_argb},
     {IDC_TEXT_SWATCH, IDC_TEXT_HEX, &Settings::text_argb},
     {IDC_ACTIVE_TEXT_SWATCH, IDC_ACTIVE_TEXT_HEX, &Settings::active_text_argb},
+    {IDC_CHIP_SWATCH, IDC_CHIP_HEX, &Settings::chip_argb},
 };
-//! The Hover page edits one of two sets: the other tabs' (Settings::hover_*) or the active tab's.
+//! The Hover page shows two sets side by side: the other tabs' (Settings::hover_*) and the
+//! active tab's (Settings::active_hover_*).
 struct HoverFields {
     HoverStyle Settings::*style;
     HoverColour Settings::*colour;
@@ -283,7 +454,34 @@ constexpr HoverFields hover_active{&Settings::active_hover_style,         &Setti
                                    &Settings::active_hover_argb,          &Settings::active_hover_fill_strength,
                                    &Settings::active_hover_line_width,    &Settings::active_hover_line_opacity,
                                    &Settings::active_hover_text,          &Settings::active_hover_text_argb};
+//! One column of the Hover page.
+struct HoverIds {
+    int style, colour, hex, swatch, text, text_hex, text_swatch;
+    int fill_auto, fill, fill_value, line_width_auto, line_width, line_auto, line, line_value;
+};
+struct HoverSet {
+    const HoverFields& fields;
+    HoverIds ids;
+    bool active;
+};
+constexpr HoverSet hover_sets[] = {
+    {hover_others,
+     {IDC_HOVER_STYLE, IDC_HOVER_COLOUR, IDC_HOVER_HEX, IDC_HOVER_SWATCH, IDC_HOVER_TEXT, IDC_HOVER_TEXT_HEX,
+      IDC_HOVER_TEXT_SWATCH, IDC_HOVER_FILL_AUTO, IDC_HOVER_FILL, IDC_HOVER_FILL_VALUE, IDC_HOVER_LINE_WIDTH_AUTO, IDC_HOVER_LINE_WIDTH,
+      IDC_HOVER_LINE_AUTO, IDC_HOVER_LINE, IDC_HOVER_LINE_VALUE},
+     false},
+    {hover_active,
+     {IDC_HOVER_ACTIVE_STYLE, IDC_HOVER_ACTIVE_COLOUR, IDC_HOVER_ACTIVE_HEX, IDC_HOVER_ACTIVE_SWATCH,
+      IDC_HOVER_ACTIVE_TEXT, IDC_HOVER_ACTIVE_TEXT_HEX, IDC_HOVER_ACTIVE_TEXT_SWATCH, IDC_HOVER_ACTIVE_FILL_AUTO,
+      IDC_HOVER_ACTIVE_FILL, IDC_HOVER_ACTIVE_FILL_VALUE, IDC_HOVER_ACTIVE_LINE_WIDTH_AUTO, IDC_HOVER_ACTIVE_LINE_WIDTH, IDC_HOVER_ACTIVE_LINE_AUTO,
+      IDC_HOVER_ACTIVE_LINE, IDC_HOVER_ACTIVE_LINE_VALUE},
+     true},
+};
 //! The style list: the HoverStyle values in order; the active tab's starts with its plain wash.
+//! The hover mark's line is an outline (else an underline).
+[[nodiscard]] bool hover_outline(HoverStyle style) noexcept {
+    return style == HoverStyle::outline || style == HoverStyle::outline_fill;
+}
 [[nodiscard]] int hover_style_index(HoverStyle style, bool active) noexcept {
     if (!active) return style == HoverStyle::plain ? 0 : static_cast<int>(style);
     return style == HoverStyle::plain ? 0 : static_cast<int>(style) + 1;
@@ -309,21 +507,37 @@ class ConfigureDialog : public CDialogImpl<ConfigureDialog> {
 public:
     enum { IDD = IDD_CONFIGURE };
 
+    //! Modal (DoModal): edits `state` in place.
     ConfigureDialog(ConfigureState& state, ConfigureTarget& target, bool live)
-        : state_(state), target_(target), live_(live) {}
+        : state_(state), target_(target), live_(live), modeless_(false) {}
+    //! Modeless (open_configure_dialog): edits its own copy, always live, and tells `target` how it
+    //! closed. Deletes itself.
+    ConfigureDialog(const ConfigureState& state, ConfigureTarget& target)
+        : own_(state), state_(own_), target_(target), live_(true), modeless_(true) {}
+
+    //! Closes a modeless dialog without telling the target.
+    static constexpr UINT wm_close_quietly = WM_APP + 1;
 
     BEGIN_MSG_MAP_EX(ConfigureDialog)
         MSG_WM_INITDIALOG(on_init_dialog)
         MSG_WM_DESTROY(on_destroy)
+        MESSAGE_HANDLER_EX(wm_close_quietly, on_close_quietly)
         MSG_WM_COMMAND(on_command)
         MSG_WM_DRAWITEM(on_draw_item)
         MESSAGE_HANDLER_EX(WM_HSCROLL, on_hscroll)
         MESSAGE_HANDLER_EX(WM_NOTIFY, on_notify)
     END_MSG_MAP()
 
+    void OnFinalMessage(HWND) override {
+        if (modeless_) delete this;
+    }
+
 private:
     BOOL on_init_dialog(CWindow, LPARAM);
     void on_destroy();
+    LRESULT on_close_quietly(UINT, WPARAM, LPARAM);
+    //! OK or Cancel: modal, ends the dialog; modeless, tells the target and destroys the window.
+    void finish(bool ok);
     void on_command(UINT code, int id, CWindow control);
     void on_draw_item(UINT, LPDRAWITEMSTRUCT item);
     LRESULT on_hscroll(UINT, WPARAM, LPARAM);
@@ -332,6 +546,8 @@ private:
     LRESULT on_notify(UINT, WPARAM, LPARAM lparam);
 
     void create_pages();
+    //! One tooltip window for the tips table, on the controls and their labels.
+    void create_tips();
     //! Pages keep nothing themselves: commands, owner-draw and scroll messages go to the dialog.
     static INT_PTR CALLBACK page_proc(HWND, UINT, WPARAM, LPARAM);
     void show_page(int page);
@@ -400,24 +616,25 @@ private:
 
     void changed();
 
+    //! The modeless dialog's state (state_ refers to it); unused when modal.
+    ConfigureState own_;
     ConfigureState& state_;
     ConfigureTarget& target_;
     const bool live_;
+    const bool modeless_;
+    //! The target knows how the modeless dialog closed (or must not hear of it).
+    bool told_{false};
     bool loading_{false};
-    //! The Hover page shows the active tab's settings (else the other tabs').
-    bool hover_active_{false};
-    [[nodiscard]] const HoverFields& hover_fields() const noexcept { return hover_active_ ? hover_active : hover_others; }
-    [[nodiscard]] std::uint32_t Settings::*swatch_field(const Swatch& swatch) const noexcept {
-        if (swatch.button == IDC_HOVER_SWATCH) return hover_fields().argb;
-        if (swatch.button == IDC_HOVER_TEXT_SWATCH) return hover_fields().text_argb;
-        return swatch.field;
-    }
-    void fill_hover_styles();
-    void hover_to_controls();
+    void fill_hover_styles(const HoverSet& set);
+    void hover_to_controls(const HoverSet& set);
+    void hover_from_controls(const HoverSet& set);
+    void hover_values(const HoverSet& set);
+    void hover_enabled(const HoverSet& set);
     int selected_{-1};
-    HWND pages_[page_count]{};
     HFONT icon_font_{nullptr};
     HFONT emoji_font_{nullptr};
+    HWND pages_[page_count]{};
+    HWND tips_{};
     // Must be a member: it hooks the dialog and its controls for the lifetime of both.
     fb2k::CDarkModeHooks dark_;
 };
@@ -425,13 +642,13 @@ private:
 BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     dark_.AddDialogWithControls(*this);
     create_pages();
+    create_tips();
     {
         const HWND tabs = ::GetDlgItem(m_hWnd, IDC_TABS);
-        const wchar_t* const names[page_count] = {L"Strip", L"Look", L"Hover", L"Colours", L"Fonts", L"Tabs", L"Behaviour", L"Auto-hide"};
         for (int i = 0; i < page_count; ++i) {
             TCITEMW item{};
             item.mask = TCIF_TEXT;
-            item.pszText = const_cast<wchar_t*>(names[i]);
+            item.pszText = const_cast<wchar_t*>(page_names[i]);
             ::SendMessageW(tabs, TCM_INSERTITEMW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&item));
         }
         // Only the strip is wanted, not an empty page frame under it.
@@ -454,12 +671,14 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_CHEVRON), {L"At the end of the strip", L"At the start of the strip"});
     // Order matters: Indicator, one for one.
     fill_combo(control(IDC_INDICATOR), {L"Underline", L"Pill", L"Text only", L"Tab", L"Outlined tab"});
-    fill_combo(control(IDC_HOVER_TARGET), {L"Other tabs", L"The active tab"});
-    ::SendMessageW(control(IDC_HOVER_TARGET), CB_SETCURSEL, hover_active_ ? 1 : 0, 0);
-    fill_hover_styles();
-    // Order matters: HoverColour and HoverText, one for one.
-    fill_combo(control(IDC_HOVER_COLOUR), {L"Text colour", L"Accent colour", L"Custom colour"});
-    fill_combo(control(IDC_HOVER_TEXT), {L"Brightens", L"Stays as it is", L"Takes the hover colour", L"Custom colour"});
+    // Order matters: ChipColour.
+    fill_combo(control(IDC_CHIP_COLOUR), {L"Text colour", L"Accent colour", L"Custom colour"});
+    for (const HoverSet& set : hover_sets) {
+        fill_hover_styles(set);
+        // Order matters: HoverColour and HoverText, one for one.
+        fill_combo(control(set.ids.colour), {L"Text colour", L"Accent colour", L"Custom colour"});
+        fill_combo(control(set.ids.text), {L"Brightens", L"Stays as it is", L"Takes the hover colour", L"Custom colour"});
+    }
     // Order matters: AccentSource and StripBackground, one for one.
     const std::wstring ui = state_.ui_name != nullptr ? state_.ui_name : L"Columns UI";
     const std::wstring ui_selection = ui + L" selection colour";
@@ -468,7 +687,7 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     fill_combo(control(IDC_ACCENT_SOURCE),
                {ui_selection.c_str(), L"Custom colour", L"From the playing cover", ui_highlight.c_str()});
     fill_combo(control(IDC_BACKGROUND), {ui_background.c_str(), L"Custom colour", L"Tinted with the accent"});
-    fill_combo(control(IDC_MIDDLE), {L"Does nothing", L"Hides the tab"});
+    fill_combo(control(IDC_MIDDLE), {L"None", L"Hide tab"});
 
     icon_font_ = make_font(m_hWnd, system_icon_family(), 12);
     emoji_font_ = make_font(m_hWnd, L"Segoe UI Emoji", 12);
@@ -484,19 +703,12 @@ BOOL ConfigureDialog::on_init_dialog(CWindow, LPARAM) {
     return TRUE;
 }
 
-void ConfigureDialog::on_destroy() {
-    if (icon_font_ != nullptr) ::DeleteObject(icon_font_);
-    if (emoji_font_ != nullptr) ::DeleteObject(emoji_font_);
-    icon_font_ = emoji_font_ = nullptr;
-    SetMsgHandled(FALSE);
-}
-
 void ConfigureDialog::create_pages() {
     RECT host{};
     ::GetWindowRect(::GetDlgItem(m_hWnd, IDC_PAGE_HOST), &host);
     ::MapWindowPoints(nullptr, m_hWnd, reinterpret_cast<POINT*>(&host), 2);
     for (int i = 0; i < page_count; ++i) {
-        const HWND page = ::CreateDialogParamW(core_api::get_my_instance(), MAKEINTRESOURCEW(IDD_PAGE_STRIP + i),
+        const HWND page = ::CreateDialogParamW(core_api::get_my_instance(), MAKEINTRESOURCEW(page_ids[i]),
                                                m_hWnd, &ConfigureDialog::page_proc, 0);
         pages_[i] = page;
         if (page == nullptr) continue;
@@ -504,6 +716,51 @@ void ConfigureDialog::create_pages() {
                        host.bottom - host.top, SWP_NOACTIVATE);
         dark_.AddDialogWithControls(page);
         pad_text_fields(page);
+    }
+}
+
+void ConfigureDialog::create_tips() {
+    tips_ = ::CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                              CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, m_hWnd, nullptr,
+                              core_api::get_my_instance(), nullptr);
+    if (tips_ == nullptr) return;
+    RECT wrap{0, 0, 200, 0};
+    ::MapDialogRect(m_hWnd, &wrap);
+    ::SendMessageW(tips_, TTM_SETMAXTIPWIDTH, 0, wrap.right);
+    ::SendMessageW(tips_, TTM_SETDELAYTIME, TTDT_AUTOPOP, 30000);
+    DarkMode::ApplyDarkThemeCtrl(tips_, DarkMode::IsDialogDark(m_hWnd));
+    UINT_PTR area = 1;
+    // A disabled control gets no mouse messages and a label lets them through: its page gets them,
+    // so both are also areas of the page.
+    const auto add_area = [&](HWND page, HWND w, const wchar_t* text) {
+        TTTOOLINFOW info{};
+        info.cbSize = sizeof(info);
+        info.uFlags = TTF_SUBCLASS;
+        info.hwnd = page;
+        info.uId = area++;
+        ::GetWindowRect(w, &info.rect);
+        ::MapWindowPoints(HWND_DESKTOP, page, reinterpret_cast<POINT*>(&info.rect), 2);
+        info.lpszText = const_cast<wchar_t*>(text);
+        ::SendMessageW(tips_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+    };
+    for (const Tip& tip : tips) {
+        const HWND w = control(tip.id);
+        if (w == nullptr) continue;
+        const HWND page = ::GetParent(w);
+        TTTOOLINFOW info{};
+        info.cbSize = sizeof(info);
+        info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+        info.hwnd = page;
+        info.uId = reinterpret_cast<UINT_PTR>(w);
+        info.lpszText = const_cast<wchar_t*>(tip.text);
+        ::SendMessageW(tips_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
+        add_area(page, w, tip.text);
+        const HWND label = ::GetWindow(w, GW_HWNDPREV);
+        wchar_t name[16]{};
+        wchar_t text[64]{};
+        if (label == nullptr || ::GetClassNameW(label, name, 16) == 0 || std::wcscmp(name, L"Static") != 0) continue;
+        const int length = ::GetWindowTextW(label, text, 64);
+        if (length > 0 && text[length - 1] == L':') add_area(page, label, tip.text);
     }
 }
 
@@ -567,17 +824,23 @@ void ConfigureDialog::settings_to_controls() {
     set_number(IDC_MAX_WIDTH, s.max_tab_width);
 
     select(IDC_INDICATOR, static_cast<int>(s.indicator));
-    set_number(IDC_LINE_WIDTH, s.line_width);
+    check(IDC_LINE_WIDTH_AUTO, s.line_width == 0);
+    set_number(IDC_LINE_WIDTH, s.line_width != 0 ? s.line_width : auto_line_width(false));
     check(IDC_CHIP, s.chip);
+    select(IDC_CHIP_COLOUR, static_cast<int>(s.chip_colour));
+    ::SetWindowTextW(control(IDC_CHIP_HEX), format_rgb(s.chip_argb).c_str());
+    check(IDC_CHIP_STRENGTH_AUTO, s.chip_strength == 0);
+    set_slider(IDC_CHIP_STRENGTH, 2, 100,
+               s.chip_strength != 0 ? s.chip_strength : (state_.dark ? auto_chip_dark : auto_chip_light));
     set_number(IDC_RADIUS, s.corner_radius);
     check(IDC_STRENGTH_AUTO, s.accent_strength == 0);
-    set_slider(IDC_STRENGTH, 5, 100,
+    set_slider(IDC_STRENGTH, 2, 100,
                s.accent_strength != 0 ? s.accent_strength : (state_.dark ? auto_fill_dark : auto_fill_light));
     select(IDC_ACCENT_SOURCE, static_cast<int>(s.accent_source));
     ::SetWindowTextW(control(IDC_ACCENT_HEX), format_rgb(s.accent_argb).c_str());
     select(IDC_BACKGROUND, static_cast<int>(s.strip_background));
     ::SetWindowTextW(control(IDC_BACKGROUND_HEX), format_rgb(s.background_argb).c_str());
-    set_slider(IDC_TINT, 2, 60, s.tint_strength);
+    set_slider(IDC_TINT, 2, 100, s.tint_strength);
     check(IDC_TRANSPARENT, s.transparent_background);
     set_slider(IDC_TRANSPARENT_OPACITY, 0, 100, s.transparent_opacity);
     check(IDC_TEXT_CUSTOM, s.custom_text);
@@ -585,7 +848,7 @@ void ConfigureDialog::settings_to_controls() {
     check(IDC_ACTIVE_TEXT_CUSTOM, s.custom_active_text);
     ::SetWindowTextW(control(IDC_ACTIVE_TEXT_HEX), format_rgb(s.active_text_argb).c_str());
 
-    hover_to_controls();
+    for (const HoverSet& set : hover_sets) hover_to_controls(set);
     check(IDC_HOVER_FADE, s.hover_fade);
     set_number(IDC_HOVER_FADE_MS, s.hover_fade_ms);
 
@@ -613,35 +876,84 @@ void ConfigureDialog::settings_to_controls() {
     for (const Swatch& swatch : swatches) ::InvalidateRect(control(swatch.button), nullptr, FALSE);
 }
 
-void ConfigureDialog::fill_hover_styles() {
+void ConfigureDialog::fill_hover_styles(const HoverSet& set) {
     std::vector<const wchar_t*> names;
-    if (hover_active_) names.push_back(L"Plain wash");
+    if (set.active) names.push_back(L"Plain wash");
     // Order matters: HoverStyle, one for one (see hover_style_index).
     for (const wchar_t* name : {L"Fill", L"Outline", L"Outline and fill", L"Underline", L"Underline and fill", L"No mark"}) {
         names.push_back(name);
     }
-    const HWND combo = control(IDC_HOVER_STYLE);
+    const HWND combo = control(set.ids.style);
     ::SendMessageW(combo, CB_RESETCONTENT, 0, 0);
     for (const wchar_t* name : names) ::SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
 }
 
-//! The controls the two hover sets share, from the set the page shows.
-void ConfigureDialog::hover_to_controls() {
+void ConfigureDialog::hover_to_controls(const HoverSet& set) {
     const Settings& s = state_.settings;
-    const HoverFields& h = hover_fields();
-    select(IDC_HOVER_STYLE, hover_style_index(s.*h.style, hover_active_));
-    select(IDC_HOVER_COLOUR, static_cast<int>(s.*h.colour));
-    ::SetWindowTextW(control(IDC_HOVER_HEX), format_rgb(s.*h.argb).c_str());
-    check(IDC_HOVER_FILL_AUTO, s.*h.fill_strength == 0);
-    set_slider(IDC_HOVER_FILL, 2, 80, s.*h.fill_strength == 0 ? 10 : s.*h.fill_strength);
-    set_number(IDC_HOVER_LINE_WIDTH, s.*h.line_width);
-    check(IDC_HOVER_LINE_AUTO, s.*h.line_opacity == 0);
-    set_slider(IDC_HOVER_LINE, 10, 100, s.*h.line_opacity == 0 ? 50 : s.*h.line_opacity);
+    const HoverFields& h = set.fields;
+    const HoverIds& id = set.ids;
+    select(id.style, hover_style_index(s.*h.style, set.active));
+    select(id.colour, static_cast<int>(s.*h.colour));
+    ::SetWindowTextW(control(id.hex), format_rgb(s.*h.argb).c_str());
+    check(id.fill_auto, s.*h.fill_strength == 0);
+    set_slider(id.fill, 2, 100, s.*h.fill_strength == 0 ? auto_hover_fill_for(set.active) : s.*h.fill_strength);
+    check(id.line_width_auto, s.*h.line_width == 0);
+    set_number(id.line_width, s.*h.line_width != 0 ? s.*h.line_width : auto_line_width(hover_outline(s.*h.style)));
+    check(id.line_auto, s.*h.line_opacity == 0);
+    set_slider(id.line, 10, 100, s.*h.line_opacity == 0 ? 50 : s.*h.line_opacity);
     // "Brightens" is the full text colour for the others, lighter (towards white) for the active tab.
-    select(IDC_HOVER_TEXT, static_cast<int>(s.*h.text));
-    ::SetWindowTextW(control(IDC_HOVER_TEXT_HEX), format_rgb(s.*h.text_argb).c_str());
-    ::InvalidateRect(control(IDC_HOVER_SWATCH), nullptr, FALSE);
-    ::InvalidateRect(control(IDC_HOVER_TEXT_SWATCH), nullptr, FALSE);
+    select(id.text, static_cast<int>(s.*h.text));
+    ::SetWindowTextW(control(id.text_hex), format_rgb(s.*h.text_argb).c_str());
+}
+
+void ConfigureDialog::hover_from_controls(const HoverSet& set) {
+    Settings& s = state_.settings;
+    const HoverFields& h = set.fields;
+    const HoverIds& id = set.ids;
+    if (const LRESULT index = selection(id.style); index != CB_ERR) s.*h.style = hover_style_at(index, set.active);
+    if (const LRESULT index = selection(id.colour); index != CB_ERR) s.*h.colour = static_cast<HoverColour>(index);
+    s.*h.argb = parse_rgb(window_text(control(id.hex)), s.*h.argb);
+    s.*h.fill_strength = checked(id.fill_auto) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(id.fill), 2, 100));
+    s.*h.line_width =
+        checked(id.line_width_auto) ? 0 : static_cast<std::uint8_t>(std::clamp<std::uint16_t>(number(id.line_width), 1, 8));
+    s.*h.line_opacity = checked(id.line_auto) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(id.line), 10, 100));
+    if (const LRESULT index = selection(id.text); index != CB_ERR) s.*h.text = static_cast<HoverText>(index);
+    s.*h.text_argb = parse_rgb(window_text(control(id.text_hex)), s.*h.text_argb);
+}
+
+void ConfigureDialog::hover_values(const HoverSet& set) {
+    wchar_t text[16]{};
+    std::swprintf(text, 16, L"%d%%", slider(set.ids.fill));
+    set_label(set.ids.fill_value, checked(set.ids.fill_auto) ? L"" : text);
+    std::swprintf(text, 16, L"%d%%", slider(set.ids.line));
+    set_label(set.ids.line_value, checked(set.ids.line_auto) ? L"" : text);
+}
+
+//! Each control only where the chosen style uses it.
+void ConfigureDialog::hover_enabled(const HoverSet& set) {
+    const Settings& s = state_.settings;
+    const HoverFields& h = set.fields;
+    const HoverIds& id = set.ids;
+    const HoverStyle hs = s.*h.style;
+    const bool hover_fill = hs == HoverStyle::fill || hs == HoverStyle::outline_fill || hs == HoverStyle::underline_fill;
+    const bool hover_line = hs == HoverStyle::outline || hs == HoverStyle::outline_fill ||
+                            hs == HoverStyle::underline || hs == HoverStyle::underline_fill;
+    // The plain wash is always the text colour.
+    const bool hover_tinted = (hs != HoverStyle::none && hs != HoverStyle::plain) || s.*h.text == HoverText::colour;
+    enable(id.colour, hover_tinted);
+    const bool custom_hover = hover_tinted && s.*h.colour == HoverColour::custom;
+    enable(id.hex, custom_hover);
+    enable(id.swatch, custom_hover);
+    enable(id.text_hex, s.*h.text == HoverText::custom);
+    enable(id.text_swatch, s.*h.text == HoverText::custom);
+    enable(id.fill_auto, hover_fill);
+    enable(id.fill, hover_fill && s.*h.fill_strength != 0);
+    enable(id.fill_value, hover_fill && s.*h.fill_strength != 0);
+    enable(id.line_width_auto, hover_line);
+    enable(id.line_width, hover_line && s.*h.line_width != 0);
+    enable(id.line_auto, hover_line);
+    enable(id.line, hover_line && s.*h.line_opacity != 0);
+    enable(id.line_value, hover_line && s.*h.line_opacity != 0);
 }
 
 void ConfigureDialog::settings_from_controls() {
@@ -668,15 +980,21 @@ void ConfigureDialog::settings_from_controls() {
     s.max_tab_width = number(IDC_MAX_WIDTH);
 
     pick(IDC_INDICATOR, s.indicator);
-    s.line_width = static_cast<std::uint8_t>((std::min)(number(IDC_LINE_WIDTH), std::uint16_t{8}));
+    s.line_width = checked(IDC_LINE_WIDTH_AUTO)
+                       ? 0
+                       : static_cast<std::uint8_t>(std::clamp<std::uint16_t>(number(IDC_LINE_WIDTH), 1, 8));
     s.chip = checked(IDC_CHIP);
+    pick(IDC_CHIP_COLOUR, s.chip_colour);
+    s.chip_argb = parse_rgb(window_text(control(IDC_CHIP_HEX)), s.chip_argb);
+    s.chip_strength =
+        checked(IDC_CHIP_STRENGTH_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_CHIP_STRENGTH), 2, 100));
     s.corner_radius = number(IDC_RADIUS);
-    s.accent_strength = checked(IDC_STRENGTH_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_STRENGTH), 5, 100));
+    s.accent_strength = checked(IDC_STRENGTH_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_STRENGTH), 2, 100));
     pick(IDC_ACCENT_SOURCE, s.accent_source);
     s.accent_argb = parse_rgb(window_text(control(IDC_ACCENT_HEX)), s.accent_argb);
     pick(IDC_BACKGROUND, s.strip_background);
     s.background_argb = parse_rgb(window_text(control(IDC_BACKGROUND_HEX)), s.background_argb);
-    s.tint_strength = static_cast<std::uint8_t>(std::clamp(slider(IDC_TINT), 2, 60));
+    s.tint_strength = static_cast<std::uint8_t>(std::clamp(slider(IDC_TINT), 2, 100));
     s.transparent_background = checked(IDC_TRANSPARENT);
     s.transparent_opacity = static_cast<std::uint8_t>(std::clamp(slider(IDC_TRANSPARENT_OPACITY), 0, 100));
     s.custom_text = checked(IDC_TEXT_CUSTOM);
@@ -684,17 +1002,7 @@ void ConfigureDialog::settings_from_controls() {
     s.custom_active_text = checked(IDC_ACTIVE_TEXT_CUSTOM);
     s.active_text_argb = parse_rgb(window_text(control(IDC_ACTIVE_TEXT_HEX)), s.active_text_argb);
 
-    const HoverFields& h = hover_fields();
-    if (const LRESULT index = selection(IDC_HOVER_STYLE); index != CB_ERR) s.*h.style = hover_style_at(index, hover_active_);
-    pick(IDC_HOVER_COLOUR, s.*h.colour);
-    s.*h.argb = parse_rgb(window_text(control(IDC_HOVER_HEX)), s.*h.argb);
-    s.*h.fill_strength =
-        checked(IDC_HOVER_FILL_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_HOVER_FILL), 2, 80));
-    s.*h.line_width = static_cast<std::uint8_t>((std::min)(number(IDC_HOVER_LINE_WIDTH), std::uint16_t{8}));
-    s.*h.line_opacity =
-        checked(IDC_HOVER_LINE_AUTO) ? 0 : static_cast<std::uint8_t>(std::clamp(slider(IDC_HOVER_LINE), 10, 100));
-    pick(IDC_HOVER_TEXT, s.*h.text);
-    s.*h.text_argb = parse_rgb(window_text(control(IDC_HOVER_TEXT_HEX)), s.*h.text_argb);
+    for (const HoverSet& set : hover_sets) hover_from_controls(set);
     s.hover_fade = checked(IDC_HOVER_FADE);
     s.hover_fade_ms = number(IDC_HOVER_FADE_MS);
 
@@ -723,14 +1031,13 @@ void ConfigureDialog::update_values() {
     wchar_t text[16]{};
     std::swprintf(text, 16, L"%d%%", slider(IDC_STRENGTH));
     set_label(IDC_STRENGTH_VALUE, checked(IDC_STRENGTH_AUTO) ? L"" : text);
+    std::swprintf(text, 16, L"%d%%", slider(IDC_CHIP_STRENGTH));
+    set_label(IDC_CHIP_STRENGTH_VALUE, checked(IDC_CHIP_STRENGTH_AUTO) ? L"" : text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_TINT));
     set_label(IDC_TINT_VALUE, text);
     std::swprintf(text, 16, L"%d%%", slider(IDC_TRANSPARENT_OPACITY));
     set_label(IDC_TRANSPARENT_OPACITY_VALUE, text);
-    std::swprintf(text, 16, L"%d%%", slider(IDC_HOVER_FILL));
-    set_label(IDC_HOVER_FILL_VALUE, checked(IDC_HOVER_FILL_AUTO) ? L"" : text);
-    std::swprintf(text, 16, L"%d%%", slider(IDC_HOVER_LINE));
-    set_label(IDC_HOVER_LINE_VALUE, checked(IDC_HOVER_LINE_AUTO) ? L"" : text);
+    for (const HoverSet& set : hover_sets) hover_values(set);
 }
 
 void ConfigureDialog::show_fonts() {
@@ -782,9 +1089,18 @@ void ConfigureDialog::update_enabled() {
     // The strength is the opacity of the accent fill, which only the pill and the tab have.
     const bool fill = s.indicator == Indicator::pill || s.indicator == Indicator::tab;
     enable(IDC_STRENGTH_AUTO, fill);
-    enable(IDC_LINE_WIDTH, s.indicator == Indicator::underline || s.indicator == Indicator::tab_outline);
+    const bool line = s.indicator == Indicator::underline || s.indicator == Indicator::tab_outline;
+    enable(IDC_LINE_WIDTH_AUTO, line);
+    enable(IDC_LINE_WIDTH, line && s.line_width != 0);
     enable(IDC_STRENGTH, fill && s.accent_strength != 0);
     enable(IDC_STRENGTH_VALUE, fill && s.accent_strength != 0);
+    enable(IDC_CHIP_COLOUR, s.chip);
+    const bool custom_chip = s.chip && s.chip_colour == ChipColour::custom;
+    enable(IDC_CHIP_HEX, custom_chip);
+    enable(IDC_CHIP_SWATCH, custom_chip);
+    enable(IDC_CHIP_STRENGTH_AUTO, s.chip);
+    enable(IDC_CHIP_STRENGTH, s.chip && s.chip_strength != 0);
+    enable(IDC_CHIP_STRENGTH_VALUE, s.chip && s.chip_strength != 0);
     const bool custom_accent = s.accent_source == AccentSource::custom;
     enable(IDC_ACCENT_HEX, custom_accent);
     enable(IDC_ACCENT_SWATCH, custom_accent);
@@ -801,28 +1117,7 @@ void ConfigureDialog::update_enabled() {
     enable(IDC_ACTIVE_TEXT_HEX, s.custom_active_text);
     enable(IDC_ACTIVE_TEXT_SWATCH, s.custom_active_text);
 
-    // Hover: each control only where the chosen style uses it.
-    const HoverFields& h = hover_fields();
-    const HoverStyle hs = s.*h.style;
-    const bool hover_fill = hs == HoverStyle::fill || hs == HoverStyle::outline_fill || hs == HoverStyle::underline_fill;
-    const bool hover_line = hs == HoverStyle::outline || hs == HoverStyle::outline_fill ||
-                            hs == HoverStyle::underline || hs == HoverStyle::underline_fill;
-    // The plain wash is always the text colour.
-    const bool hover_tinted = (hs != HoverStyle::none && hs != HoverStyle::plain) ||
-                              s.*h.text == HoverText::colour;
-    enable(IDC_HOVER_COLOUR, hover_tinted);
-    const bool custom_hover = hover_tinted && s.*h.colour == HoverColour::custom;
-    enable(IDC_HOVER_HEX, custom_hover);
-    enable(IDC_HOVER_SWATCH, custom_hover);
-    enable(IDC_HOVER_TEXT_HEX, s.*h.text == HoverText::custom);
-    enable(IDC_HOVER_TEXT_SWATCH, s.*h.text == HoverText::custom);
-    enable(IDC_HOVER_FILL_AUTO, hover_fill);
-    enable(IDC_HOVER_FILL, hover_fill && s.*h.fill_strength != 0);
-    enable(IDC_HOVER_FILL_VALUE, hover_fill && s.*h.fill_strength != 0);
-    enable(IDC_HOVER_LINE_WIDTH, hover_line);
-    enable(IDC_HOVER_LINE_AUTO, hover_line);
-    enable(IDC_HOVER_LINE, hover_line && s.*h.line_opacity != 0);
-    enable(IDC_HOVER_LINE_VALUE, hover_line && s.*h.line_opacity != 0);
+    for (const HoverSet& set : hover_sets) hover_enabled(set);
     // The fade is shared: it matters while either set shows something.
     const bool fades = s.hover_style != HoverStyle::none || s.hover_text != HoverText::unchanged ||
                        s.active_hover_style != HoverStyle::none || s.active_hover_text != HoverText::unchanged;
@@ -958,6 +1253,36 @@ void ConfigureDialog::remove_selected() {
     changed();
 }
 
+void ConfigureDialog::finish(bool ok) {
+    if (!modeless_) {
+        EndDialog(ok ? IDOK : IDCANCEL);
+        return;
+    }
+    told_ = true;
+    target_.configure_closed(ok, state_);
+    DestroyWindow();
+}
+
+void ConfigureDialog::on_destroy() {
+    SetMsgHandled(FALSE);
+    if (icon_font_ != nullptr) ::DeleteObject(icon_font_);
+    if (emoji_font_ != nullptr) ::DeleteObject(emoji_font_);
+    icon_font_ = emoji_font_ = nullptr;
+    if (!modeless_) return;
+    modeless_dialog_manager::g_remove(m_hWnd);
+    // Destroyed with its owner (foobar2000 closing): as Cancel.
+    if (!told_) {
+        told_ = true;
+        target_.configure_closed(false, state_);
+    }
+}
+
+LRESULT ConfigureDialog::on_close_quietly(UINT, WPARAM, LPARAM) {
+    told_ = true;
+    DestroyWindow();
+    return 0;
+}
+
 void ConfigureDialog::changed() {
     update_values();
     update_enabled();
@@ -968,9 +1293,9 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
     switch (id) {
     case IDOK:
         settings_from_controls();
-        EndDialog(IDOK);
+        finish(true);
         return;
-    case IDCANCEL: EndDialog(IDCANCEL); return;
+    case IDCANCEL: finish(false); return;
     default: break;
     }
     if (loading_) return;
@@ -985,28 +1310,17 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
     case IDC_BACKGROUND_SWATCH:
     case IDC_HOVER_SWATCH:
     case IDC_HOVER_TEXT_SWATCH:
+    case IDC_HOVER_ACTIVE_SWATCH:
+    case IDC_HOVER_ACTIVE_TEXT_SWATCH:
     case IDC_TEXT_SWATCH:
-    case IDC_ACTIVE_TEXT_SWATCH: {
+    case IDC_ACTIVE_TEXT_SWATCH:
+    case IDC_CHIP_SWATCH: {
         if (code != BN_CLICKED) return;
         const Swatch& swatch = swatch_for(id);
         const int hex = swatch.hex;
-        std::uint32_t argb = state_.settings.*swatch_field(swatch);
+        std::uint32_t argb = state_.settings.*swatch.field;
         // Fires EN_CHANGE, and with it the usual change handling.
         if (pick_colour(m_hWnd, argb)) ::SetWindowTextW(control(hex), format_rgb(argb).c_str());
-        return;
-    }
-    case IDC_HOVER_TARGET: {
-        // Another set of settings, not a change: show it without reading the controls first.
-        if (code != CBN_SELCHANGE) return;
-        const bool active = selection(IDC_HOVER_TARGET) == 1;
-        if (active == hover_active_) return;
-        hover_active_ = active;
-        loading_ = true;
-        fill_hover_styles();
-        hover_to_controls();
-        loading_ = false;
-        update_values();
-        update_enabled();
         return;
     }
     case IDC_TAB_TITLE_HELP:
@@ -1063,6 +1377,36 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
         return;
     default: break;
     }
+    if (code == BN_CLICKED && checked(id)) {
+        // Ticking Automatic puts the slider (or the width) back where it rests: on the automatic
+        // value.
+        int bar = 0, rest = 0, width = 0;
+        switch (id) {
+        case IDC_STRENGTH_AUTO: bar = IDC_STRENGTH, rest = state_.dark ? auto_fill_dark : auto_fill_light; break;
+        case IDC_CHIP_STRENGTH_AUTO:
+            bar = IDC_CHIP_STRENGTH, rest = state_.dark ? auto_chip_dark : auto_chip_light;
+            break;
+        case IDC_HOVER_FILL_AUTO: bar = IDC_HOVER_FILL, rest = auto_hover_fill; break;
+        case IDC_HOVER_ACTIVE_FILL_AUTO: bar = IDC_HOVER_ACTIVE_FILL, rest = auto_active_hover_fill; break;
+        case IDC_HOVER_LINE_AUTO: bar = IDC_HOVER_LINE, rest = 50; break;
+        case IDC_HOVER_ACTIVE_LINE_AUTO: bar = IDC_HOVER_ACTIVE_LINE, rest = 50; break;
+        case IDC_LINE_WIDTH_AUTO: width = IDC_LINE_WIDTH, rest = auto_line_width(false); break;
+        case IDC_HOVER_LINE_WIDTH_AUTO:
+            width = IDC_HOVER_LINE_WIDTH, rest = auto_line_width(hover_outline(state_.settings.hover_style));
+            break;
+        case IDC_HOVER_ACTIVE_LINE_WIDTH_AUTO:
+            width = IDC_HOVER_ACTIVE_LINE_WIDTH;
+            rest = auto_line_width(hover_outline(state_.settings.active_hover_style));
+            break;
+        default: break;
+        }
+        if (bar != 0) ::SendMessageW(control(bar), TBM_SETPOS, TRUE, rest);
+        if (width != 0) {
+            loading_ = true;
+            set_number(width, static_cast<std::uint16_t>(rest));
+            loading_ = false;
+        }
+    }
     if (code == EN_CHANGE || code == BN_CLICKED || code == CBN_SELCHANGE) {
         settings_from_controls();
         for (const Swatch& swatch : swatches) {
@@ -1074,9 +1418,14 @@ void ConfigureDialog::on_command(UINT code, int id, CWindow) {
 
 LRESULT ConfigureDialog::on_hscroll(UINT, WPARAM, LPARAM lparam) {
     const auto bar = reinterpret_cast<HWND>(lparam);
-    if (loading_ || bar == nullptr ||
-        (bar != control(IDC_STRENGTH) && bar != control(IDC_TINT) && bar != control(IDC_HOVER_FILL) &&
-         bar != control(IDC_HOVER_LINE) && bar != control(IDC_TRANSPARENT_OPACITY))) {
+    const auto ours = [this, bar] {
+        for (const int id : {IDC_STRENGTH, IDC_CHIP_STRENGTH, IDC_TINT, IDC_TRANSPARENT_OPACITY, IDC_HOVER_FILL,
+                             IDC_HOVER_LINE, IDC_HOVER_ACTIVE_FILL, IDC_HOVER_ACTIVE_LINE}) {
+            if (bar == control(id)) return true;
+        }
+        return false;
+    };
+    if (loading_ || bar == nullptr || !ours()) {
         SetMsgHandled(FALSE);
         return 0;
     }
@@ -1097,7 +1446,7 @@ void ConfigureDialog::on_draw_item(UINT, LPDRAWITEMSTRUCT item) {
         return;
     }
     const Swatch& swatch = swatch_for(static_cast<int>(item->CtlID));
-    const std::uint32_t argb = parse_rgb(window_text(control(swatch.hex)), state_.settings.*swatch_field(swatch));
+    const std::uint32_t argb = parse_rgb(window_text(control(swatch.hex)), state_.settings.*swatch.field);
     draw_swatch(*item, colorref(argb));
 }
 
@@ -1148,6 +1497,23 @@ private:
 bool run_configure_dialog(HWND parent, ConfigureState& state, ConfigureTarget& target, bool live) {
     ConfigureDialog dialog(state, target, live);
     return dialog.DoModal(parent) == IDOK;
+}
+
+HWND open_configure_dialog(HWND owner, const ConfigureState& state, ConfigureTarget& target) {
+    auto* dialog = new ConfigureDialog(state, target);
+    if (dialog->Create(owner) == nullptr) {
+        delete dialog;
+        return nullptr;
+    }
+    const HWND wnd = dialog->m_hWnd;
+    // Tab, Enter and Esc work as in a modal dialog.
+    modeless_dialog_manager::g_add(wnd);
+    ::ShowWindow(wnd, SW_SHOW);
+    return wnd;
+}
+
+void close_configure_dialog(HWND wnd) {
+    if (wnd != nullptr && ::IsWindow(wnd) != FALSE) ::SendMessageW(wnd, ConfigureDialog::wm_close_quietly, 0, 0);
 }
 
 bool run_rename_dialog(HWND parent, const std::wstring& panel_name, TabExtra& extra) {

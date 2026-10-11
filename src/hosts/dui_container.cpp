@@ -742,17 +742,19 @@ void DuiContainer::edit_mode_context_menu_build(const POINT&, bool from_keyboard
         can_paste = ui_element_common_methods::get()->is_paste_available();
     } catch (...) {
     }
-    AppendMenuW(menu, MF_STRING, base + edit_add, L"Add new tab...");
-    AppendMenuW(menu, MF_STRING | (can_paste ? 0 : MF_GRAYED), base + edit_paste, L"Paste as new tab");
+    // Greyed while the Configure dialog is open: its OK or Cancel would undo these.
+    const UINT editing = configuring() ? MF_GRAYED : 0;
+    AppendMenuW(menu, MF_STRING | editing, base + edit_add, L"Add new tab...");
+    AppendMenuW(menu, MF_STRING | (can_paste ? editing : MF_GRAYED), base + edit_paste, L"Paste as new tab");
     if (edit_menu_tab_ != nullptr) {
         const std::wstring name = menu_text(edit_menu_tab_->label.empty() ? edit_menu_tab_->name : edit_menu_tab_->label);
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, (L"Tab: " + name).c_str());
-        AppendMenuW(menu, MF_STRING, base + edit_replace, L"Replace tab's element...");
+        AppendMenuW(menu, MF_STRING | editing, base + edit_replace, L"Replace tab's element...");
         AppendMenuW(menu, MF_STRING | (edit_menu_tab_->guid == pfc::guid_null ? MF_GRAYED : 0), base + edit_copy,
                     L"Copy tab's element");
-        AppendMenuW(menu, MF_STRING, base + edit_rename, L"Rename tab...");
-        AppendMenuW(menu, MF_STRING, base + edit_remove, L"Remove tab");
+        AppendMenuW(menu, MF_STRING | editing, base + edit_rename, L"Rename tab...");
+        AppendMenuW(menu, MF_STRING | editing, base + edit_remove, L"Remove tab");
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, base + edit_configure, L"Configure " BETTERTABS_NAME L"...");
@@ -779,7 +781,7 @@ void DuiContainer::edit_mode_context_menu_command(const POINT&, bool, unsigned i
     case edit_remove:
         if (tab != nullptr) remove_or_empty(tab);
         break;
-    case edit_configure: run_configure(wnd_); break;
+    case edit_configure: run_configure(wnd_, true); break;
     default: break;
     }
 }
@@ -787,8 +789,9 @@ void DuiContainer::edit_mode_context_menu_command(const POINT&, bool, unsigned i
 void DuiContainer::host_edit_mode_context_menu_build(unsigned id, const POINT&, bool, HMENU menu,
                                                      unsigned& id_base) {
     const DuiTab* tab = by_serial(id);
-    AppendMenuW(menu, MF_STRING | (tab == nullptr ? MF_GRAYED : 0), id_base + child_rename, L"Rename tab...");
-    AppendMenuW(menu, MF_STRING | (tab == nullptr ? MF_GRAYED : 0), id_base + child_remove, L"Remove tab");
+    const UINT editing = tab == nullptr || configuring() ? MF_GRAYED : 0;
+    AppendMenuW(menu, MF_STRING | editing, id_base + child_rename, L"Rename tab...");
+    AppendMenuW(menu, MF_STRING | editing, id_base + child_remove, L"Remove tab");
     AppendMenuW(menu, MF_STRING, id_base + child_configure, L"Configure " BETTERTABS_NAME L"...");
     id_base += child_count;
 }
@@ -805,7 +808,7 @@ void DuiContainer::host_edit_mode_context_menu_command(unsigned id, const POINT&
     case child_remove:
         if (tab != nullptr) remove_or_empty(tab);
         break;
-    case child_configure: run_configure(wnd_); break;
+    case child_configure: run_configure(wnd_, true); break;
     default: break;
     }
 }

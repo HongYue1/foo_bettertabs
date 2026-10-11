@@ -17,6 +17,7 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "fbc/fonts.h"
@@ -254,6 +255,7 @@ const std::vector<TabsCore*>& TabsCore::live() noexcept { return live_list(); }
 TabsCore::TabsCore() { live_list().push_back(this); }
 
 TabsCore::~TabsCore() {
+    close_configure_dialog(std::exchange(configure_wnd_, nullptr));
     std::erase(live_list(), this);
     ah_sync_parent_watch();
 }
@@ -311,7 +313,7 @@ void TabsCore::reload(InstanceData&& data) {
     load(std::move(data));
     if (!live) return;
     for (auto& tab : tabs_) host_prepare(*tab);
-    strip_.set_settings(settings_);
+    strip_.set_settings(strip_settings());
     update_cover_subscription();
     refresh_colours();
     ah_update_mode();
@@ -999,7 +1001,7 @@ void TabsCore::on_create(HWND wnd) noexcept {
     step(0);
     try {
         if (!strip_.create(wnd, *this)) log::warn("could not create the tab strip");
-        strip_.set_settings(settings_);
+        strip_.set_settings(strip_settings());
         step(1);
         update_cover_subscription();
         step(2);
@@ -1069,6 +1071,12 @@ void TabsCore::on_destroy() noexcept {
     ah_shown_ = false;
     ah_progress_ = 0.0f;
     menu_pin_ = false;
+    if (configure_wnd_ != nullptr) {
+        // The container goes first: what the dialog previewed is not kept.
+        settings_ = configure_original_.settings;
+        close_configure_dialog(std::exchange(configure_wnd_, nullptr));
+        config_tabs_.clear();
+    }
     hot_zone_.destroy();
     ah_sync_parent_watch();
     strip_.destroy();
@@ -1246,7 +1254,7 @@ void TabsCore::update_cover_subscription() noexcept {
 
 void TabsCore::apply_settings() noexcept {
     clamp(settings_);
-    strip_.set_settings(settings_);
+    strip_.set_settings(strip_settings());
     if (settings_.font != applied_font_) refresh_font();
     update_cover_subscription();
     refresh_colours();
@@ -1372,7 +1380,7 @@ void TabsCore::on_strip_step(int direction) noexcept {
 }
 
 void TabsCore::on_strip_middle_click(std::size_t index) noexcept {
-    if (settings_.middle_click == MiddleClick::nothing || index >= visible_.size()) return;
+    if (settings_.middle_click == MiddleClick::nothing || configuring() || index >= visible_.size()) return;
     set_tab_hidden(tabs_[visible_[index]].get(), true);
 }
 
@@ -1453,7 +1461,7 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
             }
             if (selected.size() >= 2) {
                 // The last visible tab always stays.
-                const UINT all = selected.size() >= snapshot.size() ? MF_GRAYED : 0;
+                const UINT all = selected.size() >= snapshot.size() || configuring() ? MF_GRAYED : 0;
                 const std::wstring hide = L"Hide " + std::to_wstring(selected.size()) + L" tabs";
                 AppendMenuW(menu, MF_STRING | all, cmd_hide_selected, hide.c_str());
                 AppendMenuW(menu, MF_STRING, cmd_clear_selection, L"Clear selection");
@@ -1461,10 +1469,12 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
             } else if (clicked != nullptr) {
                 const bool side =
                     settings_.position == StripPosition::left || settings_.position == StripPosition::right;
-                const UINT first = strip_index == 0 ? MF_GRAYED : 0;
-                const UINT last = strip_index + 1 >= snapshot.size() ? MF_GRAYED : 0;
-                AppendMenuW(menu, MF_STRING, cmd_rename, L"Rename...");
-                AppendMenuW(menu, MF_STRING | (snapshot.size() < 2 ? MF_GRAYED : 0), cmd_hide, L"Hide tab");
+                // Greyed while the Configure dialog is open: its OK or Cancel would undo these.
+                const UINT editing = configuring() ? MF_GRAYED : 0;
+                const UINT first = strip_index == 0 ? MF_GRAYED : editing;
+                const UINT last = strip_index + 1 >= snapshot.size() ? MF_GRAYED : editing;
+                AppendMenuW(menu, MF_STRING | editing, cmd_rename, L"Rename...");
+                AppendMenuW(menu, MF_STRING | (snapshot.size() < 2 ? MF_GRAYED : editing), cmd_hide, L"Hide tab");
                 AppendMenuW(menu, MF_STRING | first, cmd_move_back, side ? L"Move up" : L"Move left");
                 AppendMenuW(menu, MF_STRING | last, cmd_move_forward, side ? L"Move down" : L"Move right");
             }
@@ -1477,7 +1487,8 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
                         std::wstring name = hidden[i]->label.empty() ? host_panel_name(*hidden[i]) : hidden[i]->label;
                         AppendMenuW(sub, MF_STRING, menu_unhide_base + static_cast<UINT>(i), menu_text(name).c_str());
                     }
-                    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(sub), L"Show hidden tab");
+                    AppendMenuW(menu, MF_POPUP | (configuring() ? MF_GRAYED : 0), reinterpret_cast<UINT_PTR>(sub),
+                                L"Show hidden tab");
                 }
             }
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -1513,7 +1524,7 @@ void TabsCore::show_tab_menu(std::size_t strip_index, POINT screen, bool with_pa
                     move_tab(snapshot[strip_index], snapshot[strip_index + 1]);
                 }
                 break;
-            case cmd_configure: run_configure(self); break;
+            case cmd_configure: run_configure(self, true); break;
             case cmd_hide_selected:
                 // By tab, not index: each hide rebuilds the strip. set_tab_hidden keeps the last one.
                 for (Tab* t : selected_for_menu_) {
@@ -1644,7 +1655,8 @@ void TabsCore::append_style_menu(HMENU menu) const noexcept {
               s.visibility == StripVisibility::two_or_more);
         radio(m, style_show_auto_hide, L"Auto-hide", s.visibility == StripVisibility::auto_hide);
     }
-    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(style), L"Appearance");
+    // Greyed while the Configure dialog is open: its OK or Cancel would undo these.
+    AppendMenuW(menu, MF_POPUP | (configuring() ? MF_GRAYED : 0), reinterpret_cast<UINT_PTR>(style), L"Appearance");
 }
 
 void TabsCore::run_style_command(unsigned command) noexcept {
@@ -1702,8 +1714,14 @@ void TabsCore::run_style_command(unsigned command) noexcept {
     apply_settings();
 }
 
-bool TabsCore::run_configure(HWND parent) {
+bool TabsCore::run_configure(HWND parent, bool modeless) {
     const auto keep_alive = host_keep_alive();
+    if (configure_wnd_ != nullptr) {
+        // One dialog per container: bring back the open one.
+        if (IsIconic(configure_wnd_) != FALSE) ShowWindow(configure_wnd_, SW_RESTORE);
+        SetForegroundWindow(configure_wnd_);
+        return false;
+    }
     ConfigureState original;
     original.settings = settings_;
     original.ui_name = host_ui_name();
@@ -1738,18 +1756,31 @@ bool TabsCore::run_configure(HWND parent) {
         config_tabs_.clear();
         return false;
     }
-    ConfigureState state = original;
     const bool live = core_wnd() != nullptr;
+    // Owned by the window the user is in: Columns UI's Layout page passes the main window,
+    // which would put the dialog behind Preferences.
+    HWND owner = GetActiveWindow();
+    if (owner == nullptr || IsWindowEnabled(owner) == FALSE) {
+        owner = parent != nullptr ? GetAncestor(parent, GA_ROOT) : core_api::get_main_window();
+    }
+    if (modeless && live) {
+        try {
+            configure_original_ = original;
+            configure_wnd_ = open_configure_dialog(owner, original, *this);
+        } catch (const std::exception& e) {
+            log::warn(std::string("the Configure dialog failed: ") + e.what());
+        }
+        if (configure_wnd_ != nullptr) {
+            strip_.set_settings(strip_settings()); // no drag reordering meanwhile
+            ah_evaluate();                         // an auto-hidden strip stays shown while the dialog is open
+            return false;
+        }
+    }
+    ConfigureState state = original;
     bool ok = false;
     const bool pinned = menu_pin_; // already set when opened from the tab menu
     menu_pin_ = true;              // an auto-hidden strip stays shown while the dialog is open
     try {
-        // Owned by the window the user is in: Columns UI's Layout page passes the main window,
-        // which would put the dialog behind Preferences.
-        HWND owner = GetActiveWindow();
-        if (owner == nullptr || IsWindowEnabled(owner) == FALSE) {
-            owner = parent != nullptr ? GetAncestor(parent, GA_ROOT) : core_api::get_main_window();
-        }
         ok = run_configure_dialog(owner, state, *this, live);
     } catch (const std::exception& e) {
         log::warn(std::string("the Configure dialog failed: ") + e.what());
@@ -1761,6 +1792,21 @@ bool TabsCore::run_configure(HWND parent) {
     if (ok) commit_removals();
     config_tabs_.clear();
     return ok;
+}
+
+void TabsCore::configure_closed(bool ok, const ConfigureState& state) noexcept {
+    configure_wnd_ = nullptr;
+    // Cancel puts back what the live preview changed.
+    preview(ok ? state : configure_original_);
+    if (ok) commit_removals();
+    config_tabs_.clear();
+    ah_evaluate();
+}
+
+Settings TabsCore::strip_settings() const noexcept {
+    Settings s = settings_;
+    if (configuring()) s.drag_reorder = false;
+    return s;
 }
 
 void TabsCore::commit_removals() noexcept {
@@ -1815,7 +1861,7 @@ void TabsCore::preview(const ConfigureState& state) noexcept {
             }
         }
         if (core_wnd() == nullptr) return;
-        strip_.set_settings(settings_);
+        strip_.set_settings(strip_settings());
         if (settings_.font != applied_font_) refresh_font();
         update_cover_subscription();
         refresh_colours();
@@ -1958,7 +2004,7 @@ void CALLBACK TabsCore::ah_on_parent_change(HWINEVENTHOOK, DWORD event, HWND wnd
 
 bool TabsCore::ah_pointer_or_pinned() const noexcept {
     const HWND strip = strip_.hwnd();
-    if (menu_pin_ || strip_.dragging()) return true;
+    if (menu_pin_ || configure_wnd_ != nullptr || strip_.dragging()) return true;
     if (strip != nullptr && (GetCapture() == strip || GetFocus() == strip)) return true;
     POINT pt{};
     if (!GetCursorPos(&pt)) return false;

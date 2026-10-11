@@ -14,9 +14,10 @@
 - **Works in both UIs**: a splitter in Columns UI and a container element in Default UI, with the
   same strip, menus and settings.
 - **Strip on any side**, with rotated titles on the left and right if you like.
-- **Your look**: underline, pill, tab, outlined tab or text-only indicator, chips, corner radius,
-  tab width and alignment, spacing, hover styles (the active tab has its own), text colours, a tab
-  font with fallbacks, and transparency with an adjustable background opacity.
+- **Your look**: underline, pill, tab, outlined tab or text-only indicator, chips (in the text colour,
+  the accent or your own colour, any strength), corner radius, tab width and alignment, spacing, hover
+  styles (the active tab has its own), text colours, a tab font with fallbacks, and transparency
+  with an adjustable background opacity.
 - **Icons on tabs** (Segoe Fluent Icons or emoji), or icon-only tabs.
 - **Accent colour** from the UI, a custom colour or the playing track's cover, and a strip
   background that can be tinted with it. Colours, fonts and dark mode follow your Columns UI or
@@ -42,8 +43,10 @@ Columns UI is optional.
    **View > Layout > Enable layout editing mode**, then right-click > **Replace UI Element... >
    Containers > Better Tabs**. It starts with one empty tab; click it to pick an element.
 
-Settings are under **Configure...** in the strip menu. They belong to each container, preview live,
-and **Cancel** undoes them.
+Settings are under **Configure...** in the strip menu (in Columns UI also on the Layout page). They
+belong to each container, preview live, and **Cancel** undoes them. The dialog doesn't block
+foobar2000, so you can hover and click the tabs while you try settings.
+Hover over a setting's label to see what it does and its range.
 
 ## Keyboard and mouse
 
@@ -54,7 +57,7 @@ and **Cancel** undoes them.
 | Click empty strip space, Esc | Clear the selection |
 | Mouse wheel | Previous / next tab |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab, while the focus is inside the container |
-| Middle click | Nothing, or hide the tab (Behaviour page) |
+| Middle click | Nothing, or hide the tab (Input page) |
 | Drag a tab | Reorder; a selected tab brings the whole selection along; Esc cancels |
 | Right-click the strip | Tab list, rename, hide, move, show hidden tab, Appearance, Configure |
 
@@ -65,7 +68,7 @@ and, on a tab, **Replace**, **Copy**, **Rename** and **Remove**. Right-click an 
 ## Good to know
 
 - **Tab titles**: Rename with an empty title goes back to the panel's own name. Title formatting
-  is optional per tab (see **Help** on the Tabs page).
+  is optional per tab (see **Functions** on the Tabs page).
 - **Icons**: enter a code point (such as `E8D6`) or paste a character. Copy Segoe Fluent Icons
   from Character Map and emoji from Win+. (period).
 - **Tabs that follow playback**: on the Tabs page, a tab can be shown when playback starts or

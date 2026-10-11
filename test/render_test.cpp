@@ -135,6 +135,9 @@ struct Look {
     int icons{0};
     //! Ctrl+click tabs 3 and 4 (with the active tab 1): the selection look.
     bool select{false};
+    ChipColour chip_colour{ChipColour::neutral};
+    std::uint8_t chip_strength{0};
+    std::uint32_t chip_argb{0xFF3EA6FFu};
 };
 
 //! Fluent/MDL2 code points, and one emoji (U+1F3B5) through the label font's fallback.
@@ -166,6 +169,10 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         {"light underline", false, Indicator::underline, false, no_index, 560},
         {"light pill", false, Indicator::pill, false, 1, 560},
         {"light chips", false, Indicator::none, true, no_index, 560},
+        {"dark accent chips", true, Indicator::underline, true, 2, 560, StripPosition::top, SideText::horizontal, 0,
+         ChipColour::accent, 25},
+        {"light strong custom chips", false, Indicator::none, true, no_index, 560, StripPosition::top,
+         SideText::horizontal, 0, ChipColour::custom, 60, 0xFF203040u},
         {"dark icons", true, Indicator::underline, false, no_index, 560, StripPosition::top, SideText::horizontal, 1},
         {"light icon pill", false, Indicator::pill, false, no_index, 560, StripPosition::top, SideText::horizontal, 1},
     };
@@ -182,7 +189,7 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
     const int gap = px(8);
     Canvas canvas;
     // Rows of horizontal strips, then the side strips next to each other.
-    canvas.init(px(560) + 2 * gap + px(3 * 160), px(560), 0x808080);
+    canvas.init(px(560) + 2 * gap + px(3 * 160), px(720), 0x808080);
 
     int failures = 0;
     int y = gap;
@@ -207,6 +214,9 @@ int render_dpi(unsigned dpi, HWND parent, NullListener& listener) {
         Settings s;
         s.indicator = look.indicator;
         s.chip = look.chip;
+        s.chip_colour = look.chip_colour;
+        s.chip_strength = look.chip_strength;
+        s.chip_argb = look.chip_argb;
         s.position = look.position;
         s.side_text = look.side;
         strip.set_settings(s);

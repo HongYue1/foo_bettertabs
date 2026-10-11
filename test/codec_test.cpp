@@ -93,6 +93,9 @@ Settings odd_settings() {
     s.custom_active_text = true;
     s.active_text_argb = 0xFFFFD700u;
     s.transparent_opacity = 35;
+    s.chip_colour = ChipColour::custom;
+    s.chip_argb = 0xFF204060u;
+    s.chip_strength = 30;
     return s;
 }
 

@@ -68,8 +68,8 @@ public:
     void export_config(stream_writer* writer, abort_callback& abort) const override;
     bool have_config_popup() const override { return true; }
     //! The Configure dialog. Also called by Columns UI's Layout page on an instance that has no
-    //! window (it reads get_config afterwards).
-    bool show_config_popup(HWND parent) override { return run_configure(parent); }
+    //! window (it reads get_config afterwards): modal, so the page gets the result.
+    bool show_config_popup(HWND parent) override { return run_configure(parent, false); }
 
     uie::container_window_v3_config get_window_config() override {
         // Not transparent: that would repaint the whole container on every move and resize.

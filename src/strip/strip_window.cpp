@@ -170,7 +170,8 @@ void fill_shape(ID2D1RenderTarget* target, ID2D1Brush* fill, ID2D1Brush* line, c
 // The look. Overlay strengths are alpha of the text colour over the strip.
 constexpr float hover_alpha_dark = 0.08f;
 constexpr float hover_alpha_light = 0.06f;
-constexpr float chip_alpha = 0.05f;
+constexpr float chip_alpha_dark = static_cast<float>(auto_chip_dark) / 100.0f;
+constexpr float chip_alpha_light = static_cast<float>(auto_chip_light) / 100.0f;
 constexpr float chip_active_alpha = 0.18f;
 constexpr float pill_alpha_dark = static_cast<float>(auto_fill_dark) / 100.0f;
 constexpr float pill_alpha_light = static_cast<float>(auto_fill_light) / 100.0f;
@@ -182,9 +183,6 @@ constexpr float selected_alpha_light = 0.14f;
 //! From this fill opacity on, the active tab's text is chosen for contrast against the fill.
 constexpr float strong_fill = 0.40f;
 constexpr float inactive_text = 0.70f;
-//! The automatic hover fill in the accent or a custom colour (Settings::hover_colour).
-constexpr float hover_colour_alpha_dark = 0.14f;
-constexpr float hover_colour_alpha_light = 0.12f;
 //! The automatic hover outline or underline in the text colour.
 constexpr float hover_line_text_alpha = 0.50f;
 
@@ -592,7 +590,7 @@ StripWindow::HoverMark StripWindow::hover_mark(bool active) const noexcept {
     if (active) {
         return {settings_.active_hover_style,         settings_.active_hover_colour,
                 settings_.active_hover_argb,          settings_.active_hover_fill_strength,
-                settings_.active_hover_line_width,    settings_.active_hover_line_opacity};
+                settings_.active_hover_line_width,    settings_.active_hover_line_opacity, true};
     }
     return {settings_.hover_style,         settings_.hover_colour,      settings_.hover_argb,
             settings_.hover_fill_strength, settings_.hover_line_width, settings_.hover_line_opacity};
@@ -612,9 +610,8 @@ COLORREF StripWindow::hover_colour(const HoverMark& mark) const noexcept {
 
 float StripWindow::hover_fill_alpha(const HoverMark& mark) const noexcept {
     if (mark.fill_strength != 0) return static_cast<float>(mark.fill_strength) / 100.0f;
-    // Automatic: the plain wash in the text colour; a colour gets a little more to show its hue.
-    if (mark.colour == HoverColour::text) return theme_.dark ? hover_alpha_dark : hover_alpha_light;
-    return theme_.dark ? hover_colour_alpha_dark : hover_colour_alpha_light;
+    // Automatic: a little more on the active tab so it still shows over its own fill.
+    return static_cast<float>(mark.active ? auto_active_hover_fill : auto_hover_fill) / 100.0f;
 }
 
 float StripWindow::hover_line_alpha(const HoverMark& mark) const noexcept {
@@ -646,6 +643,20 @@ float StripWindow::active_fill_alpha() const noexcept {
         return theme_.dark ? pill_alpha_dark : pill_alpha_light;
     }
     return chip_active_alpha;
+}
+
+COLORREF StripWindow::chip_fill() const noexcept {
+    switch (settings_.chip_colour) {
+    case ChipColour::accent: return theme_.accent;
+    case ChipColour::custom: return argb_colour(settings_.chip_argb);
+    case ChipColour::neutral: break;
+    }
+    return theme_.text;
+}
+
+float StripWindow::chip_fill_alpha() const noexcept {
+    if (settings_.chip_strength != 0) return static_cast<float>(settings_.chip_strength) / 100.0f;
+    return theme_.dark ? chip_alpha_dark : chip_alpha_light;
 }
 
 bool StripWindow::accent_filled() const noexcept {
@@ -1272,6 +1283,8 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
     // drawn on top keeps ClearType.
     float fill_alpha = 0.0f;
     COLORREF fill = theme_.text;
+    //! The chip's fill under the title (0 when another fill took its place).
+    float chip_under = 0.0f;
     const bool filled_indicator = accent_filled();
     const bool accent_fill = active_look && filled_indicator;
     const float hover_alpha = theme_.dark ? hover_alpha_dark : hover_alpha_light;
@@ -1287,10 +1300,16 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
         fill = theme_.accent;
         fill_alpha = (theme_.dark ? selected_alpha_dark : selected_alpha_light) + hover_alpha * active_hover;
     } else if (active_hover > 0.0f || settings_.chip) {
-        // The active chip (underline, text only) is a little stronger than the others.
-        const float rest = settings_.chip ? (active ? chip_alpha + hover_alpha * 0.5f : chip_alpha) : 0.0f;
-        const float full = hover_alpha + (settings_.chip ? chip_alpha : 0.0f);
+        // The active chip (underline, text only) is stronger than the others, at any strength.
+        const float chip = settings_.chip ? chip_fill_alpha() : 0.0f;
+        const float active_chip = (std::min)(1.0f, chip + (std::max)(chip * 0.5f, hover_alpha * 0.5f));
+        const float rest = settings_.chip ? (active ? active_chip : chip) : 0.0f;
+        const float full = settings_.chip ? rest + hover_alpha * 0.5f : hover_alpha;
         fill_alpha = rest + (full - rest) * active_hover;
+        if (settings_.chip) {
+            fill = chip_fill();
+            chip_under = fill_alpha;
+        }
     }
     if (accent_fill) fill = accent_fill_colour(theme_, fill_alpha);
     if (fill_alpha > 0.0f) {
@@ -1390,6 +1409,13 @@ void StripWindow::draw_tab(std::size_t index) noexcept {
                 if (std::fabs(colour::apca_contrast(colour::rgb_from_colorref(text), under)) < colour::text_min_lc) {
                     text = colour::colorref_from_rgb(colour::text_on(under));
                 }
+            }
+        }
+        if (chip_under >= strong_fill && !chosen) {
+            // A strong chip: the title must read on it too.
+            const std::uint32_t under = colour::rgb_from_colorref(blend(fill, surface_, chip_under));
+            if (std::fabs(colour::apca_contrast(colour::rgb_from_colorref(text), under)) < colour::text_min_lc) {
+                text = colour::colorref_from_rgb(colour::text_on(under));
             }
         }
         const bool final_fill = active && filled_indicator;

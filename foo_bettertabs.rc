@@ -8,16 +8,22 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
 // Dialog style profile (keep every page consistent with this):
 //   sections : header + etched line, no group boxes, no bold
-//   fields   : labels in a left column (84 DU, field at 99), colon after
+//   fields   : labels in a left column (84 DU, field at 99), noun + colon
 //   rhythm   : check boxes 14 DU apart, field rows 16 DU, 12 DU before a new section header
-//   hints    : plain text under the control, or beside it for one short fact; units right of
-//              the field
-//   columns  : one column 7..293; content indented 5
-//   colours  : hex edit + swatch button that opens the colour picker
+//   labels   : short; beside a number only its unit ("px", "ms"). Ranges, what 0 or Automatic
+//              means and anything not clear at first glance go in the control's tooltip (the
+//              tips table in configure_dialog.cpp; it shows on the label too). No notes, no footers
+//   automatic: an "Automatic" check box before the slider or edit it sets (never "Auto")
+//   columns  : one column 7..293; content indented 5. The Hover page alone has two (other
+//              tabs | active tab, labels 62 DU, fields at 77 and 187)
+//   colours  : "<thing> colour:" combo, then "Custom colour:" hex edit + swatch button that opens
+//              the colour picker
+//   sliders  : strengths 2-100 %, value right of the slider
 
 /////////////////////////////////////////////////////////////////////////////
-// Configure: modal, per container. The strip, the area the pages are placed in (IDC_PAGE_HOST,
-// never shown) and the buttons.
+// Configure: per container, modeless beside the element (modal from Columns UI's Layout
+// page). The strip, the area the pages are placed in (IDC_PAGE_HOST, never shown) and the
+// buttons.
 
 IDD_CONFIGURE DIALOGEX 0, 0, 300, 270
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
@@ -31,8 +37,8 @@ BEGIN
     PUSHBUTTON      "Cancel",IDCANCEL,243,250,50,14
 END
 
-// Pages: child dialogs, 300 x 218, created once and shown one at a time. Keep the ids
-// consecutive and in tab order.
+// Pages: child dialogs, 300 x 218, created once and shown one at a time, in tab order (the
+// page list in configure_dialog.cpp).
 
 IDD_PAGE_STRIP DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
@@ -44,9 +50,8 @@ BEGIN
     COMBOBOX        IDC_POSITION,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Strip thickness:",IDC_STATIC,12,39,84,8
     EDITTEXT        IDC_THICKNESS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs, 0 follows the font (0-200)",IDC_STATIC,131,39,162,8
-    CONTROL         "Rotate the text on side strips",IDC_ROTATE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,53,281,10
-
+    LTEXT           "px",IDC_STATIC,131,39,162,8
+    CONTROL         "Rotate the text on side strips",IDC_ROTATE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,54,281,10
     LTEXT           "Tabs",IDC_STATIC,7,75,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,85,286,1
     LTEXT           "Tab width:",IDC_STATIC,12,94,84,8
@@ -55,44 +60,53 @@ BEGIN
     COMBOBOX        IDC_ALIGN,99,108,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Overflow chevron:",IDC_STATIC,12,126,84,8
     COMBOBOX        IDC_CHEVRON,99,124,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Shorten titles to fit before showing the chevron",IDC_SHRINK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,140,281,10
-    LTEXT           "Longest title:",IDC_STATIC,12,156,84,8
-    EDITTEXT        IDC_MAX_WIDTH,99,154,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs, then cut with an ellipsis (0 = no limit)",IDC_STATIC,131,156,162,8
-    LTEXT           "Padding across:",IDC_STATIC,12,172,84,8
-    EDITTEXT        IDC_PAD_X,99,170,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs on each side of the title (0-64)",IDC_STATIC,131,172,162,8
-    LTEXT           "Padding along:",IDC_STATIC,12,188,84,8
-    EDITTEXT        IDC_PAD_Y,99,186,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs above and below the title (0-64)",IDC_STATIC,131,188,162,8
-    LTEXT           "Spacing:",IDC_STATIC,12,204,84,8
-    EDITTEXT        IDC_SPACING,99,202,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs between tabs (0-64)",IDC_STATIC,131,204,162,8
+    CONTROL         "Shorten titles to fit first",IDC_SHRINK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,141,281,10
+    LTEXT           "Longest title:",IDC_STATIC,12,158,84,8
+    EDITTEXT        IDC_MAX_WIDTH,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,158,162,8
+    LTEXT           "Padding across:",IDC_STATIC,12,174,84,8
+    EDITTEXT        IDC_PAD_X,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,174,162,8
+    LTEXT           "Padding along:",IDC_STATIC,12,190,84,8
+    EDITTEXT        IDC_PAD_Y,99,188,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,190,162,8
+    LTEXT           "Spacing:",IDC_STATIC,12,206,84,8
+    EDITTEXT        IDC_SPACING,99,204,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,206,162,8
 END
 
 IDD_PAGE_LOOK DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
-    LTEXT           "Active tab",IDC_STATIC,7,4,286,8
+    LTEXT           "All tabs",IDC_STATIC,7,4,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    LTEXT           "Indicator:",IDC_STATIC,12,23,84,8
-    COMBOBOX        IDC_INDICATOR,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Line width:",IDC_STATIC,12,39,84,8
-    EDITTEXT        IDC_LINE_WIDTH,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs (0 = automatic, 1-8)",IDC_STATIC,131,39,162,8
-    LTEXT           "Fill strength:",IDC_STATIC,12,55,84,8
-    CONTROL         "Automatic",IDC_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,54,52,10
-    CONTROL         "",IDC_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,52,108,14
-    LTEXT           "",IDC_STRENGTH_VALUE,265,55,28,8
-
-    LTEXT           "Every tab",IDC_STATIC,7,76,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,86,286,1
-    CONTROL         "Show every tab as a chip",IDC_CHIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,93,281,10
-    LTEXT           "Corner radius:",IDC_STATIC,12,109,84,8
-    EDITTEXT        IDC_RADIUS,99,107,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs (0-32)",IDC_STATIC,131,109,162,8
-    LTEXT           "The hovered tab's look is on the Hover page, the colours on the Colours page.",IDC_STATIC,12,125,281,8
+    CONTROL         "Show every tab as a chip",IDC_CHIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,22,281,10
+    LTEXT           "Chip colour:",IDC_STATIC,12,39,84,8
+    COMBOBOX        IDC_CHIP_COLOUR,99,37,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom colour:",IDC_STATIC,12,55,84,8
+    EDITTEXT        IDC_CHIP_HEX,99,53,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_CHIP_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,53,24,12
+    LTEXT           "Chip strength:",IDC_STATIC,12,71,84,8
+    CONTROL         "Automatic",IDC_CHIP_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,70,52,10
+    CONTROL         "",IDC_CHIP_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,67,108,14
+    LTEXT           "",IDC_CHIP_STRENGTH_VALUE,265,71,28,8
+    LTEXT           "Corner radius:",IDC_STATIC,12,87,84,8
+    EDITTEXT        IDC_RADIUS,99,85,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,87,162,8
+    CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,102,281,10
+    LTEXT           "Active tab",IDC_STATIC,7,123,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,133,286,1
+    LTEXT           "Indicator:",IDC_STATIC,12,142,84,8
+    COMBOBOX        IDC_INDICATOR,99,140,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Line width:",IDC_STATIC,12,158,84,8
+    CONTROL         "Automatic",IDC_LINE_WIDTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,157,52,10
+    EDITTEXT        IDC_LINE_WIDTH,153,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,185,158,108,8
+    LTEXT           "Fill strength:",IDC_STATIC,12,174,84,8
+    CONTROL         "Automatic",IDC_STRENGTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,173,52,10
+    CONTROL         "",IDC_STRENGTH,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,170,108,14
+    LTEXT           "",IDC_STRENGTH_VALUE,265,174,28,8
 END
 
 IDD_PAGE_HOVER DIALOGEX 0, 0, 300, 218
@@ -101,39 +115,50 @@ FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
     LTEXT           "Hovered tab",IDC_STATIC,7,4,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    CONTROL         "Fade in and out",IDC_HOVER_FADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,22,84,10
-    EDITTEXT        IDC_HOVER_FADE_MS,99,21,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms (50-1000), for every tab",IDC_STATIC,131,23,162,8
-    LTEXT           "Settings for:",IDC_STATIC,12,38,84,8
-    COMBOBOX        IDC_HOVER_TARGET,99,36,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Style:",IDC_STATIC,12,53,84,8
-    COMBOBOX        IDC_HOVER_STYLE,99,51,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Colour:",IDC_STATIC,12,69,84,8
-    COMBOBOX        IDC_HOVER_COLOUR,99,67,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Custom colour:",IDC_STATIC,12,85,84,8
-    EDITTEXT        IDC_HOVER_HEX,99,83,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_HOVER_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,83,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,85,122,8
-    LTEXT           "Title:",IDC_STATIC,12,101,84,8
-    COMBOBOX        IDC_HOVER_TEXT,99,99,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Title colour:",IDC_STATIC,12,117,84,8
-    EDITTEXT        IDC_HOVER_TEXT_HEX,99,115,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_HOVER_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,115,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,117,122,8
-
-    LTEXT           "Fill and line",IDC_STATIC,7,139,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,149,286,1
-    LTEXT           "Fill strength:",IDC_STATIC,12,158,84,8
-    CONTROL         "Automatic",IDC_HOVER_FILL_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,157,52,10
-    CONTROL         "",IDC_HOVER_FILL,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,155,108,14
-    LTEXT           "",IDC_HOVER_FILL_VALUE,265,158,28,8
-    LTEXT           "Line width:",IDC_STATIC,12,174,84,8
-    EDITTEXT        IDC_HOVER_LINE_WIDTH,99,172,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs (0 = automatic, 1-8)",IDC_STATIC,131,174,162,8
-    LTEXT           "Line opacity:",IDC_STATIC,12,190,84,8
-    CONTROL         "Automatic",IDC_HOVER_LINE_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,189,52,10
-    CONTROL         "",IDC_HOVER_LINE,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,153,187,108,14
-    LTEXT           "",IDC_HOVER_LINE_VALUE,265,190,28,8
+    LTEXT           "Other tabs",IDC_STATIC,77,23,105,8
+    LTEXT           "Active tab",IDC_STATIC,187,23,105,8
+    LTEXT           "Style:",IDC_STATIC,12,36,62,8
+    COMBOBOX        IDC_HOVER_STYLE,77,34,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_HOVER_ACTIVE_STYLE,187,34,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Colour:",IDC_STATIC,12,52,62,8
+    COMBOBOX        IDC_HOVER_COLOUR,77,50,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_HOVER_ACTIVE_COLOUR,187,50,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom colour:",IDC_STATIC,12,68,62,8
+    EDITTEXT        IDC_HOVER_HEX,77,66,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_HOVER_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,121,66,24,12
+    EDITTEXT        IDC_HOVER_ACTIVE_HEX,187,66,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_HOVER_ACTIVE_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,231,66,24,12
+    LTEXT           "Title:",IDC_STATIC,12,84,62,8
+    COMBOBOX        IDC_HOVER_TEXT,77,82,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_HOVER_ACTIVE_TEXT,187,82,105,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Title colour:",IDC_STATIC,12,100,62,8
+    EDITTEXT        IDC_HOVER_TEXT_HEX,77,98,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_HOVER_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,121,98,24,12
+    EDITTEXT        IDC_HOVER_ACTIVE_TEXT_HEX,187,98,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_HOVER_ACTIVE_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,231,98,24,12
+    LTEXT           "Fill and line",IDC_STATIC,7,122,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,132,286,1
+    LTEXT           "Fill strength:",IDC_STATIC,12,141,62,8
+    CONTROL         "Automatic",IDC_HOVER_FILL_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,140,52,10
+    CONTROL         "",IDC_HOVER_FILL,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,77,151,80,14
+    LTEXT           "",IDC_HOVER_FILL_VALUE,161,155,20,8
+    CONTROL         "Automatic",IDC_HOVER_ACTIVE_FILL_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,187,140,52,10
+    CONTROL         "",IDC_HOVER_ACTIVE_FILL,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,187,151,80,14
+    LTEXT           "",IDC_HOVER_ACTIVE_FILL_VALUE,271,155,20,8
+    LTEXT           "Line width:",IDC_STATIC,12,171,62,8
+    CONTROL         "Automatic",IDC_HOVER_LINE_WIDTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,170,52,10
+    EDITTEXT        IDC_HOVER_LINE_WIDTH,131,169,24,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,158,171,24,8
+    CONTROL         "Automatic",IDC_HOVER_ACTIVE_LINE_WIDTH_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,187,170,52,10
+    EDITTEXT        IDC_HOVER_ACTIVE_LINE_WIDTH,241,169,24,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,268,171,24,8
+    LTEXT           "Line opacity:",IDC_STATIC,12,187,62,8
+    CONTROL         "Automatic",IDC_HOVER_LINE_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,186,52,10
+    CONTROL         "",IDC_HOVER_LINE,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,77,197,80,14
+    LTEXT           "",IDC_HOVER_LINE_VALUE,161,201,20,8
+    CONTROL         "Automatic",IDC_HOVER_ACTIVE_LINE_AUTO,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,187,186,52,10
+    CONTROL         "",IDC_HOVER_ACTIVE_LINE,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,187,197,80,14
+    LTEXT           "",IDC_HOVER_ACTIVE_LINE_VALUE,271,201,20,8
 END
 
 IDD_PAGE_COLOURS DIALOGEX 0, 0, 300, 218
@@ -144,37 +169,31 @@ BEGIN
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
     LTEXT           "Accent colour:",IDC_STATIC,12,23,84,8
     COMBOBOX        IDC_ACCENT_SOURCE,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Custom accent:",IDC_STATIC,12,39,84,8
+    LTEXT           "Custom colour:",IDC_STATIC,12,39,84,8
     EDITTEXT        IDC_ACCENT_HEX,99,37,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
     CONTROL         "",IDC_ACCENT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,37,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,39,122,8
-
     LTEXT           "Text",IDC_STATIC,7,61,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,71,286,1
-    CONTROL         "Tab text:",IDC_TEXT_CUSTOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,80,84,10
-    EDITTEXT        IDC_TEXT_HEX,99,79,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,79,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,81,122,8
-    CONTROL         "Active tab text:",IDC_ACTIVE_TEXT_CUSTOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,96,84,10
-    EDITTEXT        IDC_ACTIVE_TEXT_HEX,99,95,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_ACTIVE_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,95,24,12
-    LTEXT           "RRGGBB, selected tabs too",IDC_STATIC,171,97,122,8
-
-    LTEXT           "Strip background",IDC_STATIC,7,119,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,129,286,1
-    LTEXT           "Background:",IDC_STATIC,12,138,84,8
-    COMBOBOX        IDC_BACKGROUND,99,136,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Custom background:",IDC_STATIC,12,154,84,8
-    EDITTEXT        IDC_BACKGROUND_HEX,99,152,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
-    CONTROL         "",IDC_BACKGROUND_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,152,24,12
-    LTEXT           "RRGGBB",IDC_STATIC,171,154,122,8
-    LTEXT           "Tint strength:",IDC_STATIC,12,170,84,8
-    CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,167,162,14
-    LTEXT           "",IDC_TINT_VALUE,265,170,28,8
-    CONTROL         "Transparent background (shows the layout's own background)",IDC_TRANSPARENT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,186,281,10
-    LTEXT           "Background opacity:",IDC_STATIC,12,202,84,8
-    CONTROL         "",IDC_TRANSPARENT_OPACITY,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,199,162,14
-    LTEXT           "",IDC_TRANSPARENT_OPACITY_VALUE,265,202,28,8
+    CONTROL         "Tab text:",IDC_TEXT_CUSTOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,79,84,10
+    EDITTEXT        IDC_TEXT_HEX,99,78,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,78,24,12
+    CONTROL         "Active tab text:",IDC_ACTIVE_TEXT_CUSTOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,95,84,10
+    EDITTEXT        IDC_ACTIVE_TEXT_HEX,99,94,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_ACTIVE_TEXT_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,94,24,12
+    LTEXT           "Strip background",IDC_STATIC,7,118,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,128,286,1
+    LTEXT           "Background:",IDC_STATIC,12,137,84,8
+    COMBOBOX        IDC_BACKGROUND,99,135,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Custom colour:",IDC_STATIC,12,153,84,8
+    EDITTEXT        IDC_BACKGROUND_HEX,99,151,40,12,ES_AUTOHSCROLL | ES_UPPERCASE
+    CONTROL         "",IDC_BACKGROUND_SWATCH,"Button",BS_OWNERDRAW | WS_TABSTOP,143,151,24,12
+    LTEXT           "Tint strength:",IDC_STATIC,12,169,84,8
+    CONTROL         "",IDC_TINT,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,165,162,14
+    LTEXT           "",IDC_TINT_VALUE,265,169,28,8
+    CONTROL         "Transparent background",IDC_TRANSPARENT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,184,281,10
+    LTEXT           "Background opacity:",IDC_STATIC,12,201,84,8
+    CONTROL         "",IDC_TRANSPARENT_OPACITY,"msctls_trackbar32",TBS_HORZ | TBS_NOTICKS | WS_TABSTOP,99,197,162,14
+    LTEXT           "",IDC_TRANSPARENT_OPACITY_VALUE,265,201,28,8
 END
 
 IDD_PAGE_FONTS DIALOGEX 0, 0, 300, 218
@@ -183,27 +202,24 @@ FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
     LTEXT           "Fonts",IDC_STATIC,7,4,286,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    LTEXT           "Tab font:",IDC_STATIC,12,23,70,8
-    LTEXT           "",IDC_FONT_TEXT,85,23,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
-    PUSHBUTTON      "Select...",IDC_FONT_PICK,197,20,46,14
-    PUSHBUTTON      "Default",IDC_FONT_CLEAR,247,20,46,14
-    LTEXT           "Default follows the Columns UI font for these tabs (Colours and fonts), or the Default UI tab font. Picked sizes are exact; tab icons keep their icon font.",IDC_STATIC,12,38,281,16
-
-    LTEXT           "Fallback fonts",IDC_STATIC,7,66,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,76,286,1
-    LTEXT           "Fallback 1:",IDC_STATIC,12,85,70,8
-    LTEXT           "",IDC_FALLBACK_TEXT,85,85,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
-    PUSHBUTTON      "Select...",IDC_FALLBACK_PICK,197,82,46,14
-    PUSHBUTTON      "Clear",IDC_FALLBACK_CLEAR,247,82,46,14
-    LTEXT           "Fallback 2:",IDC_STATIC,12,103,70,8
-    LTEXT           "",1204,85,103,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
-    PUSHBUTTON      "Select...",1207,197,100,46,14
-    PUSHBUTTON      "Clear",1210,247,100,46,14
-    LTEXT           "Fallback 3:",IDC_STATIC,12,121,70,8
-    LTEXT           "",1205,85,121,108,10,SS_NOPREFIX | SS_ENDELLIPSIS
-    PUSHBUTTON      "Select...",1208,197,118,46,14
-    PUSHBUTTON      "Clear",1211,247,118,46,14
-    LTEXT           "Tried in this order for characters the tab font cannot draw. Only the family is used: size, weight and italic follow the tab font. The host's own fallbacks (emoji, then Windows') come after these.",IDC_STATIC,12,136,281,24
+    LTEXT           "Tab font:",IDC_STATIC,12,24,84,8
+    LTEXT           "",IDC_FONT_TEXT,99,24,94,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",IDC_FONT_PICK,197,21,46,14
+    PUSHBUTTON      "Default",IDC_FONT_CLEAR,247,21,46,14
+    LTEXT           "Fallback fonts",IDC_STATIC,7,47,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,57,286,1
+    LTEXT           "Fallback 1:",IDC_STATIC,12,67,84,8
+    LTEXT           "",IDC_FALLBACK_TEXT,99,67,94,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",IDC_FALLBACK_PICK,197,64,46,14
+    PUSHBUTTON      "Clear",IDC_FALLBACK_CLEAR,247,64,46,14
+    LTEXT           "Fallback 2:",IDC_STATIC,12,85,84,8
+    LTEXT           "",1204,99,85,94,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",1207,197,82,46,14
+    PUSHBUTTON      "Clear",1210,247,82,46,14
+    LTEXT           "Fallback 3:",IDC_STATIC,12,103,84,8
+    LTEXT           "",1205,99,103,94,10,SS_NOPREFIX | SS_ENDELLIPSIS
+    PUSHBUTTON      "Select...",1208,197,100,46,14
+    PUSHBUTTON      "Clear",1211,247,100,46,14
 END
 
 IDD_PAGE_TABS DIALOGEX 0, 0, 300, 218
@@ -215,25 +231,69 @@ BEGIN
     LISTBOX         IDC_TAB_LIST,12,21,227,56,LBS_NOTIFY | LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_BORDER | WS_TABSTOP
     PUSHBUTTON      "Move up",IDC_MOVE_UP,243,21,50,14
     PUSHBUTTON      "Move down",IDC_MOVE_DOWN,243,37,50,14
-    PUSHBUTTON      "Remove",IDC_REMOVE,243,59,50,14
-
-    LTEXT           "Selected tab",IDC_STATIC,7,87,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,97,286,1
-    LTEXT           "Title:",IDC_STATIC,12,106,84,8
-    EDITTEXT        IDC_TAB_TITLE,99,104,140,12,ES_AUTOHSCROLL
-    PUSHBUTTON      "Help",IDC_TAB_TITLE_HELP,243,103,50,14
-    CONTROL         "Use title formatting",IDC_TAB_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,120,140,10
-    LTEXT           "Icon:",IDC_STATIC,12,136,84,8
-    EDITTEXT        IDC_TAB_ICON,99,134,40,12,ES_AUTOHSCROLL
-    LTEXT           "",IDC_TAB_ICON_PREVIEW,143,132,18,15,SS_CENTER | SS_NOPREFIX
-    PUSHBUTTON      "Character Map",IDC_CHARMAP,229,133,64,14
-    LTEXT           "A code point (E8D6) or the character. Icons: Segoe Fluent Icons (button: Character Map, or Microsoft's list). Emoji: Win+.",IDC_STATIC,99,150,194,16
-    CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,170,281,10
-    CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,184,136,10
-    CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,184,138,10
+    PUSHBUTTON      "Remove",IDC_REMOVE,243,63,50,14
+    LTEXT           "Selected tab",IDC_STATIC,7,89,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,99,286,1
+    LTEXT           "Title:",IDC_STATIC,12,108,84,8
+    EDITTEXT        IDC_TAB_TITLE,99,106,140,12,ES_AUTOHSCROLL
+    PUSHBUTTON      "Functions",IDC_TAB_TITLE_HELP,243,105,50,14
+    CONTROL         "Use title formatting",IDC_TAB_FORMAT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,99,123,140,10
+    LTEXT           "Icon:",IDC_STATIC,12,140,84,8
+    EDITTEXT        IDC_TAB_ICON,99,138,40,12,ES_AUTOHSCROLL
+    LTEXT           "",IDC_TAB_ICON_PREVIEW,143,136,18,15,SS_CENTER | SS_NOPREFIX
+    PUSHBUTTON      "Character Map",IDC_CHARMAP,229,137,64,14
+    CONTROL         "Hide this tab",IDC_TAB_HIDDEN,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,155,281,10
+    CONTROL         "Show when playback starts",IDC_TAB_ON_PLAY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,169,136,10
+    CONTROL         "Show when playback stops",IDC_TAB_ON_STOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,155,169,138,10
 END
 
-IDD_PAGE_BEHAVIOUR DIALOGEX 0, 0, 300, 218
+IDD_PAGE_ANIMATION DIALOGEX 0, 0, 300, 218
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Tabs",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    CONTROL         "Animate switches",IDC_SWITCH_ANIM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,22,84,10
+    EDITTEXT        IDC_SWITCH_MS,99,21,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,23,162,8
+    CONTROL         "Animate hovering",IDC_HOVER_FADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,38,84,10
+    EDITTEXT        IDC_HOVER_FADE_MS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,39,162,8
+    LTEXT           "Auto-hide",IDC_STATIC,7,61,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,71,286,1
+    LTEXT           "Show and hide:",IDC_STATIC,12,80,84,8
+    COMBOBOX        IDC_AH_ANIM,99,78,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Length:",IDC_STATIC,12,96,84,8
+    EDITTEXT        IDC_AH_ANIM_MS,99,94,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,96,162,8
+END
+
+IDD_PAGE_PANELS DIALOGEX 0, 0, 300, 218
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Panels",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    CONTROL         "Create panels when first shown",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,22,281,10
+    CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,36,281,10
+END
+
+IDD_PAGE_INPUT DIALOGEX 0, 0, 300, 218
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    LTEXT           "Tabs",IDC_STATIC,7,4,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
+    LTEXT           "Middle-click a tab:",IDC_STATIC,12,23,84,8
+    COMBOBOX        IDC_MIDDLE,99,21,150,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Strip",IDC_STATIC,7,45,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,55,286,1
+    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,63,281,10
+    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,77,281,10
+    CONTROL         "Ctrl+Tab cycles the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,91,281,10
+END
+
+IDD_PAGE_VISIBILITY DIALOGEX 0, 0, 300, 218
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
 BEGIN
@@ -241,55 +301,22 @@ BEGIN
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
     LTEXT           "Show the strip:",IDC_STATIC,12,23,84,8
     COMBOBOX        IDC_VISIBILITY,99,21,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Animate switches",IDC_SWITCH_ANIM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,38,84,10
-    EDITTEXT        IDC_SWITCH_MS,99,37,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms: the indicator slides (50-1000)",IDC_STATIC,131,39,162,8
-
-    LTEXT           "Mouse and keyboard",IDC_STATIC,7,57,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,67,286,1
-    CONTROL         "Switch tabs with the mouse wheel",IDC_WHEEL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,74,281,10
-    CONTROL         "Drag tabs to reorder them",IDC_DRAG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,88,281,10
-    CONTROL         "Ctrl+Tab and Ctrl+Shift+Tab cycle the tabs",IDC_CTRL_TAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,102,281,10
-    LTEXT           "Middle click:",IDC_STATIC,12,118,84,8
-    COMBOBOX        IDC_MIDDLE,99,116,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    LTEXT           "Panels",IDC_STATIC,7,138,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,148,286,1
-    CONTROL         "Create a panel only when its tab is first shown (faster startup)",IDC_LAZY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,155,281,10
-    CONTROL         "Remember the active tab",IDC_REMEMBER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,169,281,10
-    CONTROL         "Show only the icon on tabs that have one",IDC_ICONS_ONLY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,12,183,281,10
-END
-
-IDD_PAGE_AUTOHIDE DIALOGEX 0, 0, 300, 218
-STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
-FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
-BEGIN
-    LTEXT           "Auto-hide",IDC_STATIC,7,4,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,14,286,1
-    LTEXT           "Used when Show the strip (Behaviour page) is Auto-hide.",IDC_STATIC,12,21,281,8
-    LTEXT           "Reveal:",IDC_STATIC,12,37,84,8
-    COMBOBOX        IDC_AH_MODE,99,35,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Animation:",IDC_STATIC,12,53,84,8
-    COMBOBOX        IDC_AH_ANIM,99,51,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Animation length:",IDC_STATIC,12,69,84,8
-    EDITTEXT        IDC_AH_ANIM_MS,99,67,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms (50-1000)",IDC_STATIC,131,69,162,8
-
-    LTEXT           "Timing",IDC_STATIC,7,91,286,8
-    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,101,286,1
-    LTEXT           "Hot zone:",IDC_STATIC,12,110,84,8
-    EDITTEXT        IDC_AH_HOT_ZONE,99,108,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "DIPs along the edge that reveal the strip (1-32)",IDC_STATIC,131,110,162,8
-    LTEXT           "Show after:",IDC_STATIC,12,126,84,8
-    EDITTEXT        IDC_AH_REVEAL,99,124,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms in the hot zone (0-5000)",IDC_STATIC,131,126,162,8
-    LTEXT           "Hide after:",IDC_STATIC,12,142,84,8
-    EDITTEXT        IDC_AH_HIDE,99,140,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms once the pointer has left (0-5000)",IDC_STATIC,131,142,162,8
-    LTEXT           "After a switch:",IDC_STATIC,12,158,84,8
-    EDITTEXT        IDC_AH_LINGER,99,156,28,12,ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "ms shown at least (0-5000)",IDC_STATIC,131,158,162,8
-    LTEXT           "The strip also stays while its menu is open, during a drag and while it has the keyboard focus.",IDC_STATIC,12,174,281,16
+    LTEXT           "Auto-hide",IDC_STATIC,7,45,286,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,7,55,286,1
+    LTEXT           "Reveal:",IDC_STATIC,12,64,84,8
+    COMBOBOX        IDC_AH_MODE,99,62,130,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Hot zone:",IDC_STATIC,12,80,84,8
+    EDITTEXT        IDC_AH_HOT_ZONE,99,78,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "px",IDC_STATIC,131,80,162,8
+    LTEXT           "Show after:",IDC_STATIC,12,96,84,8
+    EDITTEXT        IDC_AH_REVEAL,99,94,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,96,162,8
+    LTEXT           "Hide after:",IDC_STATIC,12,112,84,8
+    EDITTEXT        IDC_AH_HIDE,99,110,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,112,162,8
+    LTEXT           "After a switch:",IDC_STATIC,12,128,84,8
+    EDITTEXT        IDC_AH_LINGER,99,126,28,12,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "ms",IDC_STATIC,131,128,162,8
 END
 
 /////////////////////////////////////////////////////////////////////////////

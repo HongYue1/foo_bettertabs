@@ -215,8 +215,14 @@ protected:
     void show_tab_menu(std::size_t strip_index, POINT screen, bool with_panel_items, bool with_style) noexcept;
     void append_style_menu(HMENU menu) const noexcept;
     void run_style_command(unsigned command) noexcept;
-    //! The Configure dialog; `live` previews on the container (it has a window).
-    bool run_configure(HWND parent);
+    //! The Configure dialog. `modeless`: it stays open beside the container (only with a window;
+    //! see open_configure_dialog) and this returns false at once. True: OK in the modal dialog.
+    bool run_configure(HWND parent, bool modeless);
+    //! The modeless Configure dialog is open. Commands that change the tabs are greyed meanwhile:
+    //! its OK or Cancel would undo them.
+    [[nodiscard]] bool configuring() const noexcept { return configure_wnd_ != nullptr; }
+    //! What the strip gets: the settings, without drag reordering while configuring().
+    [[nodiscard]] Settings strip_settings() const noexcept;
 
     // StripListener
     void on_strip_activate(std::size_t index) noexcept override;
@@ -235,6 +241,7 @@ protected:
     void on_hot_zone(bool inside, bool clicked) noexcept override;
     // ConfigureTarget
     void preview(const ConfigureState& state) noexcept override;
+    void configure_closed(bool ok, const ConfigureState& state) noexcept override;
     // cover::Listener
     void on_cover_accent_changed() noexcept override;
     void update_cover_subscription() noexcept;
@@ -302,6 +309,9 @@ protected:
     AhTimer ah_timer_{AhTimer::none};
     //! A menu (or a dialog from it) of this strip is open.
     bool menu_pin_{false};
+    //! The modeless Configure dialog, and what Cancel puts back. It pins the strip too.
+    HWND configure_wnd_{nullptr};
+    ConfigureState configure_original_;
     ULONGLONG linger_until_{0};
     //! Show/hide animation: progress 0 (hidden) to 1 (shown), heading for ah_shown_.
     bool ah_animating_{false};

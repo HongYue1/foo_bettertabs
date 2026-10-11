@@ -87,9 +87,10 @@ in dark mode (fixed in 0.6.1).
   (`StripWindow::hover_mark(active)`; same code as foo_enhancedplaylisttabs). `HoverStyle::plain`
   (active only, the default) is the old wash folded into the tab's own fill. `draw_tab` draws the
   mark (fill, outline via `fill_shape`, or underline) over the tab's own fill. The Hover page
-  edits one set at a time ("Settings for:"); writing the controls never reads them first
-  (`hover_to_controls`), title combo and title colour included (`HoverFields::text`,
-  `text_argb`). The fade is shared by both sets, so it is the first row, above "Settings for:".
+  shows both sets side by side ("Other tabs" | "Active tab"): one control set each (`HoverSet` in
+  `hover_sets`: `HoverFields` + `HoverIds`, `IDC_HOVER_*` and `IDC_HOVER_ACTIVE_*`);
+  `hover_to_controls` / `hover_from_controls` / `hover_values` / `hover_enabled` run per set.
+  The fade is shared by both sets and sits on the Animation page.
 - The title of a hovered tab: `hover_text` / `active_hover_text` (`HoverText`: brighten,
   unchanged, the hover colour, a custom colour in `*_hover_text_argb`). Brighten is "to the full
   text colour" for the others and "lighter in OKLab, towards white" for the active tab. Up to 0.9
@@ -123,6 +124,31 @@ in dark mode (fixed in 0.6.1).
 - `render_test` `hover_test` checks each style by pixels and writes `test/out/hover_96.png`. In
   tests, pump only `WM_TIMER` for the strip: the real pointer is elsewhere, and a posted
   `WM_MOUSELEAVE` ends the hover.
+- Chips (Look page): `chip_colour` (`ChipColour`: neutral ("Text colour") = the strip's text
+  colour, a grey wash, accent = whatever the accent source gives, the cover's colour too, custom =
+  `chip_argb`) and `chip_strength` (0 = `auto_chip_dark` / `auto_chip_light`, 18 and 15 %; else
+  2-100). The active chip (underline, text only) adds half its strength, at least half the hover
+  wash, so it shows at any strength. `StripWindow::chip_fill` / `chip_fill_alpha`; from
+  `strong_fill` on the title is checked for contrast against the chip unless it is a picked colour.
+- Ticking an Automatic box puts its slider (or line width) back on the automatic value
+  (`on_command`).
+- Pages (tab order = `page_ids` / `page_names` in `configure_dialog.cpp`): Strip, Look, Hover,
+  Colours, Fonts, Tabs, Animation, Panels, Input, Visibility. Layout rules are the style profile
+  at the top of the `.rc`; strengths are all 2-100 %.
+- Tooltips: the `tips` table in `configure_dialog.cpp` (control id, text); `create_tips` adds each
+  to its control, to the label before it (a static ending in a colon) and as an area of the page,
+  because a disabled control gets no mouse messages. A new setting that is not obvious gets a row.
+- The Configure dialog is modeless when the container has a window (strip menu, Default UI edit
+  menu): `run_configure(parent, true)` -> `open_configure_dialog`, so the strip can be hovered and
+  used while it is open. It owns its state copy, is always live, registers with
+  `modeless_dialog_manager` and deletes itself; OK / Cancel (or its owner closing) reach
+  `TabsCore::configure_closed`, which applies the result or `configure_original_` (tabs removed
+  on the Tabs page are destroyed only on OK). `configure_wnd_` pins an auto-hidden strip, makes a
+  second Configure focus the open dialog, turns off drag reorder (`strip_settings`) and greys the
+  menu items that change tabs or settings behind it (hide, rename, move, show hidden tab,
+  Appearance, the edit-mode items); middle-click does nothing. `on_destroy` closes the dialog
+  quietly (`close_configure_dialog`, no callback). Columns UI's Layout page stays modal
+  (`show_config_popup`, it reads `get_config` after).
 - Pages are `IDD_PAGE_STRIP + i`, so the ids stay consecutive: Strip, Look, Hover, Colours, Fonts,
   then the rest.
 - `save_png` in `render_test` writes 24 bpp BGR (WIC's PNG encoder turns 32 bpp into 24 bpp).
